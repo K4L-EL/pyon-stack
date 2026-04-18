@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck CLI + installer
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck cli/pyon install.sh
+
+  template-sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all placeholder tokens are known
+        run: |
+          set -euo pipefail
+          known='__PYON_NAME__ __PYON_DISPLAY_NAME__ __PYON_NAMESPACE__ __PYON_DB__ __PYON_PORT_WEB__ __PYON_PORT_APP__ __PYON_PORT_API__ __PYON_PORT_DB__ __PYON_JWT_SECRET__ __PYON_GH_OWNER__ __PYON_YEAR__ __pyon_name__'
+          found=$(grep -RohE '__(PYON|pyon)_[A-Z_a-z]+__' \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=obj \
+            . | sort -u)
+          echo "Tokens found in template:"
+          echo "$found"
+          for t in $found; do
+            case " $known " in
+              *" $t "*) ;;
+              *) echo "ERROR: unknown token $t — add to cli/pyon and CI allow-list"; exit 1 ;;
+            esac
+          done

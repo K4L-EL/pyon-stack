@@ -1,0 +1,62 @@
+name: __pyon_name__
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-__PYON_DB__}
+      POSTGRES_USER: ${POSTGRES_USER:-pyon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pyon}
+    ports:
+      - "__PYON_PORT_DB__:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pyon} -d ${POSTGRES_DB:-__PYON_DB__}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../apps/api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:__PYON_PORT_API__
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-__PYON_DB__};Username=${POSTGRES_USER:-pyon};Password=${POSTGRES_PASSWORD:-pyon}
+      Jwt__Secret: ${JWT_SECRET:-__PYON_JWT_SECRET__-please-rotate}
+      Jwt__Issuer: __PYON_NAME__
+      Jwt__Audience: __PYON_NAME__
+      Seed__AdminEmail: ${SEED_ADMIN_EMAIL:-admin@example.com}
+      Seed__AdminPassword: ${SEED_ADMIN_PASSWORD:-change-me-now}
+    ports:
+      - "__PYON_PORT_API__:__PYON_PORT_API__"
+
+  web:
+    build:
+      context: ../apps/web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:__PYON_PORT_API__
+      NEXT_PUBLIC_APP_URL: http://localhost:__PYON_PORT_APP__
+    ports:
+      - "__PYON_PORT_WEB__:__PYON_PORT_WEB__"
+
+  app:
+    build:
+      context: ../apps/app
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "__PYON_PORT_APP__:__PYON_PORT_APP__"
+
+volumes:
+  pgdata:

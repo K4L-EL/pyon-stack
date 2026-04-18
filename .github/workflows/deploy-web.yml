@@ -1,0 +1,29 @@
+name: Deploy Web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".github/workflows/deploy-web.yml"
+
+jobs:
+  deploy:
+    if: false  # TODO: enable and configure secrets: AZURE_STATIC_WEB_APPS_API_TOKEN_WEB
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: pnpm -C apps/web install --no-frozen-lockfile
+      - run: pnpm -C apps/web build
+      # - uses: Azure/static-web-apps-deploy@v1
+      #   with:
+      #     azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_WEB }}
+      #     action: upload
+      #     app_location: "apps/web"
+      #     output_location: ".next"

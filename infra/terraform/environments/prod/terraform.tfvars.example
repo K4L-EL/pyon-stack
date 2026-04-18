@@ -1,0 +1,7 @@
+project     = "__PYON_NAME__"
+location    = "westeurope"
+db_admin    = "pyon"
+db_password = "change-me-to-a-strong-secret"
+db_name     = "__PYON_DB__"
+api_image   = "ghcr.io/__PYON_GH_OWNER__/__PYON_NAME__-api:latest"
+jwt_secret  = "change-me-to-a-long-random-string"

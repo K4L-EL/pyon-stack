@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+# pyon — scaffold a new project from the pyon-stack template.
+# shellcheck shell=bash
+
+set -euo pipefail
+
+PYON_VERSION="0.1.0"
+PYON_REPO_DEFAULT="https://github.com/K4L-EL/pyon-stack.git"
+PYON_REPO="${PYON_REPO:-$PYON_REPO_DEFAULT}"
+
+# --- pretty logging ---------------------------------------------------------
+if [ -t 1 ]; then
+  C_R=$'\033[0m'; C_B=$'\033[1m'; C_DIM=$'\033[2m'
+  C_CYAN=$'\033[36m'; C_YEL=$'\033[33m'; C_RED=$'\033[31m'; C_GRN=$'\033[32m'
+else
+  C_R=''; C_B=''; C_DIM=''; C_CYAN=''; C_YEL=''; C_RED=''; C_GRN=''
+fi
+say()  { printf '%s%s%s\n' "$C_CYAN" "$*" "$C_R"; }
+ok()   { printf '%s✓%s %s\n' "$C_GRN" "$C_R" "$*"; }
+warn() { printf '%s!%s %s\n' "$C_YEL" "$C_R" "$*" >&2; }
+die()  { printf '%s✗%s %s\n' "$C_RED" "$C_R" "$*" >&2; exit 1; }
+
+# --- help -------------------------------------------------------------------
+usage() {
+  cat <<'EOF'
+pyon — scaffold a new project from the pyon-stack template.
+
+Usage:
+  pyon new [NAME] [options]       Create a new project
+  pyon update                     Pull latest template into ./pyon-stack-latest/ and diff
+  pyon --version | -v             Show CLI version
+  pyon --help    | -h             This help
+
+Options for `pyon new`:
+  --yes                     Accept defaults, skip prompts
+  --display    <str>        Display name (e.g. "Acme Inc")
+  --namespace  <id>         .NET namespace (PascalCase)
+  --db         <name>       Postgres database name (snake_case)
+  --port-web   <port>       Marketing site port (default 3000)
+  --port-app   <port>       Dashboard port (default 5173)
+  --port-api   <port>       API port (default 5080)
+  --port-db    <port>       Postgres port (default 5432)
+  --gh-owner   <login>      GitHub owner for repo creation
+  --create-repo             Create GitHub repo (needs `gh` CLI, authenticated)
+  --no-create-repo          Skip GitHub repo creation
+  --up                      Run `docker compose up -d` after scaffold
+  --no-up                   Skip docker compose
+  --repo       <git-url>    Use a custom template repo URL
+                            (env: PYON_REPO)
+  --template-dir <path>     Use a local directory instead of cloning
+                            (env: PYON_TEMPLATE_DIR)
+
+Environment:
+  PYON_REPO                 Default template git URL
+  PYON_TEMPLATE_DIR         Path to local pyon-stack checkout (skips clone)
+EOF
+}
+
+# --- utilities --------------------------------------------------------------
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || die "Required tool not found: $1"
+}
+
+require_any() {
+  for t in "$@"; do command -v "$t" >/dev/null 2>&1 && return 0; done
+  die "Need one of: $*"
+}
+
+rand_hex() {
+  # 48 hex chars = 192 bits
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+  else
+    LC_ALL=C tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c 48
+  fi
+}
+
+# Portable in-place sed. macOS sed needs `-i ''`, GNU sed wants `-i`.
+# Usage: sed_inplace <expr> <file>
+sed_inplace() {
+  if sed --version >/dev/null 2>&1; then
+    sed -i "$1" "$2"
+  else
+    sed -i '' "$1" "$2"
+  fi
+}
+
+# lowercase
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# slugify: lowercase, non-alnum -> '-', collapse, trim
+slugify() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//'
+}
+
+snake() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9]+/_/g; s/^_+//; s/_+$//'
+}
+
+pascal() {
+  printf '%s' "$1" | awk 'BEGIN{FS="[^A-Za-z0-9]+"; OFS=""}{
+    for (i=1;i<=NF;i++) {
+      s=$i; if (s=="") continue;
+      printf "%s%s", toupper(substr(s,1,1)), tolower(substr(s,2));
+    } print ""
+  }'
+}
+
+prompt() {
+  local msg="$1" def="${2:-}" reply
+  if [ "${YES:-0}" = "1" ]; then
+    printf '%s\n' "$def"
+    return 0
+  fi
+  if [ -n "$def" ]; then
+    printf '%s%s%s [%s]: ' "$C_B" "$msg" "$C_R" "$def" >&2
+  else
+    printf '%s%s%s: ' "$C_B" "$msg" "$C_R" >&2
+  fi
+  read -r reply </dev/tty || reply=""
+  printf '%s\n' "${reply:-$def}"
+}
+
+prompt_yn() {
+  local msg="$1" def="${2:-n}" reply
+  if [ "${YES:-0}" = "1" ]; then
+    printf '%s\n' "$def"
+    return 0
+  fi
+  printf '%s%s%s (y/N) [%s]: ' "$C_B" "$msg" "$C_R" "$def" >&2
+  read -r reply </dev/tty || reply=""
+  reply="${reply:-$def}"
+  case "$(lower "$reply")" in y|yes) printf 'y\n' ;; *) printf 'n\n' ;; esac
+}
+
+# --- commands ---------------------------------------------------------------
+
+cmd_version() { printf 'pyon %s\n' "$PYON_VERSION"; }
+
+cmd_new() {
+  local name="" display="" ns="" db=""
+  local port_web="3000" port_app="5173" port_api="5080" port_db="5432"
+  local gh_owner="" create_repo="" run_up="" template_dir="${PYON_TEMPLATE_DIR:-}"
+  YES=0
+
+  # parse flags
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes) YES=1 ;;
+      --display) display="$2"; shift ;;
+      --namespace) ns="$2"; shift ;;
+      --db) db="$2"; shift ;;
+      --port-web) port_web="$2"; shift ;;
+      --port-app) port_app="$2"; shift ;;
+      --port-api) port_api="$2"; shift ;;
+      --port-db) port_db="$2"; shift ;;
+      --gh-owner) gh_owner="$2"; shift ;;
+      --create-repo) create_repo="y" ;;
+      --no-create-repo) create_repo="n" ;;
+      --up) run_up="y" ;;
+      --no-up) run_up="n" ;;
+      --repo) PYON_REPO="$2"; shift ;;
+      --template-dir) template_dir="$2"; shift ;;
+      -h|--help) usage; return 0 ;;
+      -*) die "Unknown flag: $1 (try --help)" ;;
+      *) if [ -z "$name" ]; then name="$1"; else die "Unexpected argument: $1"; fi ;;
+    esac
+    shift
+  done
+
+  # preflight
+  require git
+  require tar
+  if [ -z "$template_dir" ]; then require git; fi
+
+  say "PYON stack — new project"
+
+  [ -z "$name" ] && name=$(prompt "Project slug (kebab-case)" "my-app")
+  name=$(slugify "$name")
+  [ -z "$name" ] && die "Project name is required"
+  [ -e "$name" ] && die "Directory '$name' already exists"
+
+  [ -z "$display" ] && display=$(prompt "Display name" "$(printf '%s' "$name" | sed -E 's/-/ /g' | awk '{for(i=1;i<=NF;i++)$i=toupper(substr($i,1,1)) tolower(substr($i,2));print}')")
+  [ -z "$ns" ] && ns=$(prompt ".NET namespace (PascalCase)" "$(pascal "$name")")
+  [ -z "$db" ] && db=$(prompt "Postgres database name (snake_case)" "$(snake "$name")")
+
+  [ -z "$port_web" ] && port_web="3000"
+  [ -z "$port_app" ] && port_app="5173"
+  [ -z "$port_api" ] && port_api="5080"
+  [ -z "$port_db" ]  && port_db="5432"
+  if [ "$YES" != "1" ]; then
+    port_web=$(prompt "Marketing site port" "$port_web")
+    port_app=$(prompt "Dashboard port"       "$port_app")
+    port_api=$(prompt "API port"             "$port_api")
+    port_db=$(prompt  "Postgres port"        "$port_db")
+  fi
+
+  [ -z "$gh_owner" ] && gh_owner=$(prompt "GitHub owner (for repo + images)" "$(git config --global user.name 2>/dev/null || echo yourname)")
+  [ -z "$create_repo" ] && create_repo=$(prompt_yn "Create GitHub repo with 'gh' now?" "n")
+  [ -z "$run_up" ] && run_up=$(prompt_yn "Run 'docker compose up -d' after scaffold?" "n")
+
+  local jwt year
+  jwt=$(rand_hex)
+  year=$(date +%Y)
+
+  # --- fetch template -------------------------------------------------------
+  if [ -n "$template_dir" ]; then
+    [ -d "$template_dir" ] || die "template-dir not found: $template_dir"
+    say "Copying template from $template_dir ..."
+    # Copy, excluding .git and node_modules
+    mkdir -p "$name"
+    (
+      cd "$template_dir"
+      tar --exclude='.git' --exclude='node_modules' --exclude='bin' \
+          --exclude='obj' --exclude='.next' --exclude='dist' -cf - .
+    ) | tar -xf - -C "$name"
+  else
+    say "Cloning template ($PYON_REPO) ..."
+    git clone --depth=1 "$PYON_REPO" "$name" >/dev/null
+    rm -rf "$name/.git"
+  fi
+
+  # --- rewrite tokens -------------------------------------------------------
+  say "Rewriting placeholders ..."
+
+  # Find every text file we need to touch. Skip binaries + common build dirs.
+  local files
+  files=$(mktemp)
+  # grep -l will skip binary files by default
+  ( cd "$name" && grep -rlE '__(PYON|pyon)_[A-Z_a-z]+__' \
+      --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=bin \
+      --exclude-dir=obj --exclude-dir=.next --exclude-dir=dist . \
+      2>/dev/null || true ) > "$files"
+
+  # Escape replacement values for sed (split into lines per token, one sed per
+  # token = simpler and very fast on small templates).
+  esc() { printf '%s' "$1" | sed -e 's/[\/&]/\\&/g'; }
+
+  local E_NAME E_DISPLAY E_NS E_DB E_PWEB E_PAPP E_PAPI E_PDB E_JWT E_OWN E_YEAR
+  E_NAME=$(esc "$name")
+  E_DISPLAY=$(esc "$display")
+  E_NS=$(esc "$ns")
+  E_DB=$(esc "$db")
+  E_PWEB=$(esc "$port_web")
+  E_PAPP=$(esc "$port_app")
+  E_PAPI=$(esc "$port_api")
+  E_PDB=$(esc "$port_db")
+  E_JWT=$(esc "$jwt")
+  E_OWN=$(esc "$gh_owner")
+  E_YEAR=$(esc "$year")
+
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    local f="$name/$rel"
+    [ -f "$f" ] || continue
+    sed_inplace "s/__PYON_DISPLAY_NAME__/$E_DISPLAY/g" "$f"
+    sed_inplace "s/__PYON_NAMESPACE__/$E_NS/g"        "$f"
+    sed_inplace "s/__PYON_PORT_WEB__/$E_PWEB/g"       "$f"
+    sed_inplace "s/__PYON_PORT_APP__/$E_PAPP/g"       "$f"
+    sed_inplace "s/__PYON_PORT_API__/$E_PAPI/g"       "$f"
+    sed_inplace "s/__PYON_PORT_DB__/$E_PDB/g"         "$f"
+    sed_inplace "s/__PYON_JWT_SECRET__/$E_JWT/g"      "$f"
+    sed_inplace "s/__PYON_GH_OWNER__/$E_OWN/g"        "$f"
+    sed_inplace "s/__PYON_YEAR__/$E_YEAR/g"           "$f"
+    sed_inplace "s/__PYON_DB__/$E_DB/g"               "$f"
+    sed_inplace "s/__PYON_NAME__/$E_NAME/g"           "$f"
+    sed_inplace "s/__pyon_name__/$E_NAME/g"           "$f"
+  done < "$files"
+  rm -f "$files"
+
+  # --- rename .NET project folder + sln + csproj ---------------------------
+  if [ -d "$name/apps/api/Pyon.Api" ]; then
+    mv "$name/apps/api/Pyon.Api" "$name/apps/api/${ns}.Api"
+  fi
+  if [ -f "$name/apps/api/${ns}.Api/Pyon.Api.csproj" ]; then
+    mv "$name/apps/api/${ns}.Api/Pyon.Api.csproj" "$name/apps/api/${ns}.Api/${ns}.Api.csproj"
+  fi
+  if [ -f "$name/apps/api/Pyon.Api.sln" ]; then
+    mv "$name/apps/api/Pyon.Api.sln" "$name/apps/api/${ns}.Api.sln"
+    # Update sln references from Pyon.Api -> ${ns}.Api (only the string literals)
+    sed_inplace "s/Pyon\.Api/${ns}.Api/g" "$name/apps/api/${ns}.Api.sln"
+  fi
+
+  # Dockerfile references
+  if [ -f "$name/apps/api/Dockerfile" ]; then
+    sed_inplace "s/Pyon\.Api\.sln/${ns}.Api.sln/g" "$name/apps/api/Dockerfile"
+    sed_inplace "s/Pyon\.Api/${ns}.Api/g"           "$name/apps/api/Dockerfile"
+  fi
+
+  # Root package.json script references to apps/api/Pyon.Api
+  if [ -f "$name/package.json" ]; then
+    sed_inplace "s|apps/api/Pyon\.Api|apps/api/${ns}.Api|g" "$name/package.json"
+    sed_inplace "s|apps/api/Pyon\.Api\.sln|apps/api/${ns}.Api.sln|g" "$name/package.json"
+  fi
+
+  # .env.example -> .env
+  if [ -f "$name/.env.example" ]; then
+    cp "$name/.env.example" "$name/.env"
+  fi
+
+  # Drop pyon-only assets from the generated project.
+  rm -rf "$name/cli" "$name/install.sh"
+  # The template's own CI workflow isn't meaningful in a new project.
+  rm -f  "$name/.github/workflows/cli-smoke.yml"
+
+  # --- git init -------------------------------------------------------------
+  say "Initializing git ..."
+  (
+    cd "$name"
+    git init -q
+    git add -A
+    git -c user.email="pyon@local" -c user.name="pyon" commit -q -m "chore: scaffold from pyon-stack ${PYON_VERSION}"
+  )
+
+  # --- optional: create GitHub repo ----------------------------------------
+  if [ "$(lower "$create_repo")" = "y" ]; then
+    if command -v gh >/dev/null 2>&1; then
+      (
+        cd "$name"
+        say "Creating GitHub repo $gh_owner/$name ..."
+        gh repo create "$gh_owner/$name" --private --source=. --push || warn "gh repo create failed — skipping"
+      )
+    else
+      warn "'gh' CLI not found — skipping repo creation. Install: https://cli.github.com"
+    fi
+  fi
+
+  # --- optional: docker compose up -----------------------------------------
+  if [ "$(lower "$run_up")" = "y" ]; then
+    if command -v docker >/dev/null 2>&1; then
+      say "Starting docker compose ..."
+      ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build )
+    else
+      warn "docker not found — skipping 'docker compose up'"
+    fi
+  fi
+
+  # --- done ----------------------------------------------------------------
+  ok "Project '$name' is ready."
+  cat <<EOF
+
+${C_B}Next steps${C_R}
+  cd $name
+  pnpm install
+  docker compose -f docker/docker-compose.yml up -d
+  open http://localhost:$port_web     # marketing site
+  open http://localhost:$port_app     # dashboard
+  curl http://localhost:$port_api/api/health
+
+${C_DIM}Admin user (from docker compose env):${C_R}
+  email:    admin@example.com
+  password: change-me-now
+EOF
+}
+
+cmd_update() {
+  local dest="pyon-stack-latest"
+  say "Fetching latest template into ./$dest/ ..."
+  rm -rf "$dest"
+  git clone --depth=1 "$PYON_REPO" "$dest" >/dev/null
+  rm -rf "$dest/.git"
+  ok "Done. Diff against your project to find upstream changes:"
+  printf '  diff -ruN your-project/ %s/\n' "$dest"
+}
+
+# --- main -------------------------------------------------------------------
+main() {
+  if [ $# -eq 0 ]; then usage; exit 0; fi
+  case "$1" in
+    -h|--help) usage ;;
+    -v|--version) cmd_version ;;
+    new) shift; cmd_new "$@" ;;
+    update) shift; cmd_update "$@" ;;
+    *) die "Unknown command: $1 (try 'pyon --help')" ;;
+  esac
+}
+
+main "$@"

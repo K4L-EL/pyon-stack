@@ -1,0 +1,24 @@
+{
+  "name": "__pyon_name__",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter=./apps/* dev",
+    "build": "pnpm -r --filter=./apps/* build",
+    "lint": "pnpm -r --filter=./apps/* lint",
+    "api:run": "dotnet run --project apps/api/Pyon.Api",
+    "api:build": "dotnet build apps/api/Pyon.Api.sln -c Release",
+    "stack:up": "docker compose -f docker/docker-compose.yml up -d",
+    "stack:down": "docker compose -f docker/docker-compose.yml down"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "overrides": {
+      "@types/react": "19.0.1",
+      "@types/react-dom": "19.0.1"
+    }
+  }
+}
