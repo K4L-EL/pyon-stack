@@ -1,15 +1,13 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
-RUN corepack enable
 COPY package.json ./
-RUN pnpm install --no-frozen-lockfile
+RUN npm install --no-audit --no-fund --legacy-peer-deps
 
 FROM node:20-alpine AS builder
 WORKDIR /app
-RUN corepack enable
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN pnpm build
+RUN npm run build
 
 FROM nginx:alpine AS runner
 COPY --from=builder /app/dist /usr/share/nginx/html

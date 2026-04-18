@@ -1,0 +1,8 @@
+bin
+obj
+.env*
+!.env.example
+Dockerfile
+.dockerignore
+.git
+.gitignore
