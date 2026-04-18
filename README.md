@@ -36,6 +36,50 @@ Or bring up the full stack:
 docker compose -f docker/docker-compose.yml up -d
 ```
 
+## AI chat (Azure OpenAI)
+
+The API ships with `POST /api/ai/chat` (JWT-protected) and the dashboard has a
+`/chat` page that talks to it. It's off by default and turns on as soon as you
+set a few environment variables on the API.
+
+**Option A — Azure OpenAI (recommended)**
+
+```bash
+# .env (consumed by docker/docker-compose.yml)
+AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com
+AZURE_OPENAI_API_KEY=<key>
+AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini   # your Azure OpenAI deployment name
+```
+
+**Option B — plain OpenAI**
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Restart the API and hit the dashboard at `/chat`. `GET /api/ai/status` reports
+whether the server considers itself configured.
+
+**Provisioning on Azure via Terraform**
+
+`infra/terraform/modules/openai` deploys an Azure OpenAI Cognitive Services
+account plus a chat deployment. Enable it per-environment:
+
+```hcl
+# infra/terraform/environments/dev/terraform.tfvars
+enable_openai        = true
+openai_location      = "eastus"
+openai_deployment    = "gpt-4o-mini"
+openai_model         = "gpt-4o-mini"
+openai_model_version = "2024-07-18"
+openai_capacity      = 20
+```
+
+When `enable_openai = true`, the dev/prod stacks automatically wire
+`AzureOpenAi__Endpoint`, `AzureOpenAi__ApiKey`, and `AzureOpenAi__Deployment`
+into the API App Service settings.
+
 ## CLI reference
 
 ```

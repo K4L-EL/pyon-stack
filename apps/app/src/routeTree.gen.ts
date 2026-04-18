@@ -7,6 +7,7 @@ import { Route as IndexRoute } from "./routes/index";
 import { Route as LoginRoute } from "./routes/login";
 import { Route as SignupRoute } from "./routes/signup";
 import { Route as DashboardRoute } from "./routes/dashboard";
+import { Route as ChatRoute } from "./routes/chat";
 import { Route as SettingsRoute } from "./routes/settings";
 import { Route as AdminIndexRoute } from "./routes/admin/index";
 import { Route as AdminBlogIndexRoute } from "./routes/admin/blog/index";
@@ -17,6 +18,7 @@ const IndexR = IndexRoute.update({ id: "/", path: "/", getParentRoute: () => roo
 const LoginR = LoginRoute.update({ id: "/login", path: "/login", getParentRoute: () => rootRoute } as any);
 const SignupR = SignupRoute.update({ id: "/signup", path: "/signup", getParentRoute: () => rootRoute } as any);
 const DashboardR = DashboardRoute.update({ id: "/dashboard", path: "/dashboard", getParentRoute: () => rootRoute } as any);
+const ChatR = ChatRoute.update({ id: "/chat", path: "/chat", getParentRoute: () => rootRoute } as any);
 const SettingsR = SettingsRoute.update({ id: "/settings", path: "/settings", getParentRoute: () => rootRoute } as any);
 const AdminIndexR = AdminIndexRoute.update({ id: "/admin/", path: "/admin/", getParentRoute: () => rootRoute } as any);
 const AdminBlogIndexR = AdminBlogIndexRoute.update({ id: "/admin/blog/", path: "/admin/blog/", getParentRoute: () => rootRoute } as any);
@@ -29,6 +31,7 @@ declare module "@tanstack/react-router" {
     "/login": { id: "/login"; path: "/login"; fullPath: "/login"; preLoaderRoute: typeof LoginRoute; parentRoute: typeof rootRoute };
     "/signup": { id: "/signup"; path: "/signup"; fullPath: "/signup"; preLoaderRoute: typeof SignupRoute; parentRoute: typeof rootRoute };
     "/dashboard": { id: "/dashboard"; path: "/dashboard"; fullPath: "/dashboard"; preLoaderRoute: typeof DashboardRoute; parentRoute: typeof rootRoute };
+    "/chat": { id: "/chat"; path: "/chat"; fullPath: "/chat"; preLoaderRoute: typeof ChatRoute; parentRoute: typeof rootRoute };
     "/settings": { id: "/settings"; path: "/settings"; fullPath: "/settings"; preLoaderRoute: typeof SettingsRoute; parentRoute: typeof rootRoute };
     "/admin/": { id: "/admin/"; path: "/admin"; fullPath: "/admin"; preLoaderRoute: typeof AdminIndexRoute; parentRoute: typeof rootRoute };
     "/admin/blog/": { id: "/admin/blog/"; path: "/admin/blog"; fullPath: "/admin/blog"; preLoaderRoute: typeof AdminBlogIndexRoute; parentRoute: typeof rootRoute };
@@ -42,6 +45,7 @@ export const routeTree = rootRoute.addChildren([
   LoginR,
   SignupR,
   DashboardR,
+  ChatR,
   SettingsR,
   AdminIndexR,
   AdminBlogIndexR,

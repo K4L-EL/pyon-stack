@@ -5,3 +5,11 @@ db_password = "change-me-to-a-strong-secret"
 db_name     = "__PYON_DB__"
 api_image   = "ghcr.io/__PYON_GH_OWNER__/__PYON_NAME__-api:latest"
 jwt_secret  = "change-me-to-a-long-random-string"
+
+# Azure OpenAI (optional)
+enable_openai        = false
+openai_location      = "eastus"
+openai_deployment    = "gpt-4o-mini"
+openai_model         = "gpt-4o-mini"
+openai_model_version = "2024-07-18"
+openai_capacity      = 50

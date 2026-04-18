@@ -17,6 +17,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 });
 
 builder.Services.AddSingleton<IJwtService, JwtService>();
+builder.Services.AddSingleton<IAiService, AiService>();
 builder.Services.AddScoped<DataSeeder>();
 
 var jwtSecret = builder.Configuration["Jwt:Secret"]

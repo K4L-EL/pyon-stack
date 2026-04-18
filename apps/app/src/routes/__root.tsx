@@ -13,6 +13,7 @@ function Shell() {
             {me ? (
               <>
                 <Link to="/dashboard" className="hover:text-foreground">Dashboard</Link>
+                <Link to="/chat" className="hover:text-foreground">Chat</Link>
                 <Link to="/settings" className="hover:text-foreground">Settings</Link>
                 {me.isAdmin ? <Link to="/admin" className="hover:text-foreground">Admin</Link> : null}
                 <span className="text-foreground">{me.displayName}</span>
