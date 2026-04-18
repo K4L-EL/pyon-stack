@@ -51,7 +51,9 @@ Options for `pyon new`:
   --gh-owner   <login>      GitHub owner for repo creation
   --create-repo             Create GitHub repo (needs `gh` CLI, authenticated)
   --no-create-repo          Skip GitHub repo creation
-  --up                      Run `docker compose up -d` after scaffold
+  --up                      After scaffold: docker compose up -d --build,
+                            then wait for the API/web/app to respond and
+                            print local URLs
   --no-up                   Skip docker compose
   --repo       <git-url>    Use a custom template repo URL
                             (env: PYON_REPO)
@@ -311,6 +313,30 @@ ai_chat_json() {
     sleep 2
   done
   return 1
+}
+
+# Poll an HTTP URL until it returns 2xx/3xx, or until the timeout elapses.
+# Usage: wait_http <url> <timeout-seconds> [label]
+# Writes a one-line progress indicator while waiting.
+wait_http() {
+  local url="$1" timeout="${2:-120}" label="${3:-$1}"
+  local start now elapsed code
+  start=$(date +%s)
+  printf '%s  waiting for %s ' "$C_DIM" "$label"
+  while :; do
+    code=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$url" 2>/dev/null || printf '000')
+    if [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null; then
+      printf '%s\n' "$C_R"
+      return 0
+    fi
+    now=$(date +%s); elapsed=$((now - start))
+    if [ "$elapsed" -ge "$timeout" ]; then
+      printf '(timeout after %ss, last code %s)%s\n' "$timeout" "$code" "$C_R"
+      return 1
+    fi
+    printf '.'
+    sleep 2
+  done
 }
 
 # Fetch a URL and strip tags, keeping a readable text+inline-css slice for GPT.
@@ -998,31 +1024,75 @@ cmd_new() {
   fi
 
   # --- optional: docker compose up -----------------------------------------
+  local up_ok="n" api_ok="n" web_ok="n" app_ok="n"
   if [ "$(lower "$run_up")" = "y" ]; then
     if command -v docker >/dev/null 2>&1; then
-      say "Starting docker compose ..."
-      ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build )
+      say "Starting docker compose (this may take a few minutes on first build) ..."
+      if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
+        up_ok="y"
+      else
+        warn "docker compose failed — you can retry with: cd $name && docker compose -f docker/docker-compose.yml up -d --build"
+      fi
     else
       warn "docker not found — skipping 'docker compose up'"
     fi
   fi
 
+  # --- probe URLs (only if we actually started docker) --------------------
+  if [ "$up_ok" = "y" ]; then
+    say "Probing services ..."
+    wait_http "http://localhost:$port_api/api/health" 180 "API"           && api_ok="y"
+    wait_http "http://localhost:$port_web"            180 "marketing site" && web_ok="y"
+    wait_http "http://localhost:$port_app"            180 "dashboard"      && app_ok="y"
+  fi
+
+  status_icon() { [ "$1" = "y" ] && printf '%s✓%s' "$C_GRN" "$C_R" || printf '%s•%s' "$C_DIM" "$C_R"; }
+
   # --- done ----------------------------------------------------------------
   ok "Project '$name' is ready."
-  cat <<EOF
+  if [ "$up_ok" = "y" ]; then
+    cat <<EOF
+
+${C_B}Your stack is live locally${C_R}
+  $(status_icon "$web_ok") Marketing site   http://localhost:$port_web
+  $(status_icon "$app_ok") Dashboard        http://localhost:$port_app
+  $(status_icon "$api_ok") API health       http://localhost:$port_api/api/health
+  $(status_icon "$api_ok") API Swagger UI   http://localhost:$port_api/swagger
+  •  Postgres          localhost:$port_db  (db: $db, user: pyon, password: pyon)
+
+${C_DIM}Admin user (seeded automatically):${C_R}
+  email:    admin@example.com
+  password: change-me-now
+
+${C_DIM}Manage the stack from inside the project dir:${C_R}
+  cd $name
+  docker compose -f docker/docker-compose.yml logs -f           # tail logs
+  docker compose -f docker/docker-compose.yml ps                # list services
+  docker compose -f docker/docker-compose.yml down              # stop
+EOF
+    if [ "$api_ok" != "y" ] || [ "$web_ok" != "y" ] || [ "$app_ok" != "y" ]; then
+      warn "One or more services didn't respond within 180s. Check 'docker compose logs' in the project."
+    fi
+  else
+    cat <<EOF
 
 ${C_B}Next steps${C_R}
   cd $name
   pnpm install
-  docker compose -f docker/docker-compose.yml up -d
+  docker compose -f docker/docker-compose.yml up -d --build
   open http://localhost:$port_web     # marketing site
   open http://localhost:$port_app     # dashboard
   curl http://localhost:$port_api/api/health
+  open http://localhost:$port_api/swagger
 
-${C_DIM}Admin user (from docker compose env):${C_R}
+${C_DIM}Or let pyon do the spin-up for you:${C_R}
+  pyon new $name --up              (adds the --up flag to auto-start + probe)
+
+${C_DIM}Admin user (seeded automatically):${C_R}
   email:    admin@example.com
   password: change-me-now
 EOF
+  fi
 }
 
 cmd_update() {
