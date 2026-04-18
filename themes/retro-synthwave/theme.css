@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* pyon theme: retro-synthwave — deep purple night, magenta + cyan neons, subtle glow */
+
+@layer base {
+  :root {
+    --background: 260 60% 8%;
+    --foreground: 300 100% 94%;
+    --card: 260 50% 12%;
+    --card-foreground: 300 100% 94%;
+    --primary: 320 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 195 100% 55%;
+    --secondary-foreground: 260 60% 8%;
+    --muted: 260 40% 18%;
+    --muted-foreground: 300 40% 80%;
+    --accent: 52 100% 60%;
+    --accent-foreground: 260 60% 8%;
+    --destructive: 0 100% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 320 70% 40%;
+    --input: 260 40% 22%;
+    --ring: 320 100% 60%;
+    --radius: 0.375rem;
+    --font-sans: "Space Grotesk", "Audiowide", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .dark {
+    --background: 260 70% 5%;
+    --foreground: 300 100% 95%;
+    --card: 260 60% 9%;
+    --card-foreground: 300 100% 95%;
+    --primary: 320 100% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 195 100% 60%;
+    --secondary-foreground: 260 70% 5%;
+    --muted: 260 50% 14%;
+    --muted-foreground: 300 40% 85%;
+    --accent: 52 100% 65%;
+    --accent-foreground: 260 70% 5%;
+    --destructive: 0 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 320 70% 45%;
+    --input: 260 50% 18%;
+    --ring: 320 100% 65%;
+  }
+  * { @apply border-border; }
+  html { font-family: var(--font-sans); }
+  body {
+    @apply text-foreground antialiased;
+    background:
+      linear-gradient(180deg, hsl(260 70% 5%) 0%, hsl(280 60% 12%) 100%),
+      hsl(var(--background));
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  code, pre { font-family: var(--font-mono); }
+  h1, h2, h3 {
+    color: hsl(var(--primary));
+    text-shadow: 0 0 12px hsl(var(--primary) / 0.6), 0 0 2px hsl(var(--primary) / 0.8);
+    letter-spacing: 0.01em;
+  }
+  a { text-shadow: 0 0 8px hsl(var(--secondary) / 0.6); }
+}
+
+@layer components {
+  .pyon-card, [data-slot="card"] {
+    border: 1px solid hsl(var(--primary) / 0.55) !important;
+    box-shadow:
+      0 0 20px hsl(var(--primary) / 0.25),
+      inset 0 0 20px hsl(var(--primary) / 0.08) !important;
+    background: hsl(var(--card) / 0.85) !important;
+  }
+  button, [role="button"] {
+    border: 1px solid hsl(var(--secondary)) !important;
+    box-shadow: 0 0 12px hsl(var(--secondary) / 0.45) !important;
+    text-shadow: 0 0 6px hsl(var(--secondary) / 0.6);
+  }
+  button:hover, [role="button"]:hover {
+    box-shadow: 0 0 18px hsl(var(--secondary) / 0.7) !important;
+  }
+}

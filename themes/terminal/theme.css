@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* pyon theme: terminal — CRT amber/green monospace on black, dashed borders, caret flicker */
+
+@layer base {
+  :root {
+    --background: 0 0% 5%;
+    --foreground: 120 90% 75%;
+    --card: 0 0% 8%;
+    --card-foreground: 120 90% 75%;
+    --primary: 120 90% 55%;
+    --primary-foreground: 0 0% 5%;
+    --secondary: 45 100% 55%;
+    --secondary-foreground: 0 0% 5%;
+    --muted: 0 0% 12%;
+    --muted-foreground: 120 40% 65%;
+    --accent: 45 100% 60%;
+    --accent-foreground: 0 0% 5%;
+    --destructive: 0 100% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 120 80% 35%;
+    --input: 0 0% 10%;
+    --ring: 120 90% 55%;
+    --radius: 0rem;
+    --font-sans: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+    --font-mono: "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+  .dark {
+    --background: 0 0% 3%;
+    --foreground: 120 90% 80%;
+    --card: 0 0% 6%;
+    --card-foreground: 120 90% 80%;
+    --primary: 120 90% 60%;
+    --primary-foreground: 0 0% 3%;
+    --secondary: 45 100% 60%;
+    --secondary-foreground: 0 0% 3%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 120 40% 70%;
+    --accent: 45 100% 65%;
+    --accent-foreground: 0 0% 3%;
+    --destructive: 0 100% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 120 80% 40%;
+    --input: 0 0% 8%;
+    --ring: 120 90% 60%;
+  }
+  * { @apply border-border; }
+  html { font-family: var(--font-mono); }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-mono);
+  }
+  h1::before, h2::before { content: "> "; color: hsl(var(--secondary)); }
+  code, pre { font-family: var(--font-mono); }
+}
+
+@layer components {
+  .pyon-card, [data-slot="card"] {
+    border: 1px dashed hsl(var(--border)) !important;
+    border-radius: 0 !important;
+    background: hsl(var(--card)) !important;
+  }
+  button, [role="button"] {
+    border: 1px solid hsl(var(--primary)) !important;
+    border-radius: 0 !important;
+    font-family: var(--font-mono) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  button::before, [role="button"]::before { content: "["; opacity: 0.7; margin-right: 0.25rem; }
+  button::after,  [role="button"]::after  { content: "]"; opacity: 0.7; margin-left: 0.25rem; }
+  input, textarea {
+    border: 1px dashed hsl(var(--border)) !important;
+    border-radius: 0 !important;
+    font-family: var(--font-mono) !important;
+  }
+  input:focus-visible, textarea:focus-visible {
+    border-style: solid !important;
+    outline: none !important;
+  }
+}

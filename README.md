@@ -21,6 +21,81 @@ The CLI prompts for project name, .NET namespace, Postgres DB name, and ports,
 then rewrites every `__PYON_*__` placeholder and (optionally) creates a GitHub
 repo and pushes the first commit.
 
+## Design system
+
+`pyon new` also asks you three design questions and applies them across both
+frontends (`apps/web` + `apps/app`) so the marketing site and dashboard share
+a consistent look out of the box.
+
+**1. Theme** — the overall visual language (typography, borders, shadows,
+component shapes). Ships with six presets:
+
+- `minimalist` — clean, low-contrast, thin borders, subtle shadows
+- `neo-brutalism` — chunky borders, hard shadows, square corners
+- `glassmorphism` — translucent frosted surfaces over a gradient
+- `claymorphism` — soft pastels, dual shadows, 3D squish on click
+- `retro-synthwave` — deep purples, neon magenta/cyan, glow effects
+- `terminal` — monospace, black + amber/green, dashed borders
+
+Each theme is a self-contained Tailwind CSS bundle under `themes/<id>/theme.css`
+that becomes the app's `globals.css` / `index.css`. The active theme is
+announced on `<html data-pyon-theme="...">` so you can target it from custom
+CSS. See `themes/README.md` for the full catalogue and instructions to add
+your own.
+
+**2. Color palette** — HSL overrides that sit on top of the chosen theme.
+Eight curated presets are provided (`slate`, `zinc`, `emerald`, `rose`,
+`indigo`, `amber`, `teal`, `cyan`), plus two dynamic modes:
+
+- **custom hex** — give three hex codes (primary / background / accent) and
+  the CLI converts them to HSL and fills the remaining tokens via a tiny
+  built-in helper
+- **url** — paste a website URL and the CLI asks OpenAI to infer a full
+  palette (light + dark) from the site's visual identity
+
+Palette presets live in `palettes/*.json`; see `palettes/README.md` for the
+token list each palette overrides.
+
+**3. Font** — picked from `fonts/fonts.json` (10 curated Google Fonts across
+sans / mono / serif / display). The CLI injects the matching `<link>` tag
+into both frontends and overrides `--font-sans` / `--font-mono` so shadcn
+components pick it up automatically.
+
+### AI copywriting
+
+After the design picks, `pyon new` offers to fill every marketing, dashboard,
+and seed-post copy slot with branded content. You can either:
+
+- describe your product in a sentence (e.g. _"an AI meal-planner for
+  families"_), or
+- paste a reference website URL you'd like the tone/structure to resemble.
+
+The CLI then calls OpenAI (defaulting to `gpt-5.4`, falling back to `gpt-4o`)
+to produce every `__PYON_COPY_*__` token — hero titles, CTAs, feature
+blurbs, pricing copy, dashboard greeting, seed blog post, etc. Your API key
+is prompted interactively and **never persisted to disk**.
+
+If you skip AI (`--no-ai`) or the network call fails, the CLI falls back to
+curated generic copy from `cli/fallbacks/copy.json` so the scaffold always
+builds cleanly.
+
+See [`docs/THEMES.md`](docs/THEMES.md) for a deeper tour of the design
+system, including how to add new themes, palettes, fonts, and copy slots.
+
+### Non-interactive flags
+
+All design + AI choices can be passed as flags for CI / scripting:
+
+```bash
+pyon new my-app --yes \
+  --theme neo-brutalism \
+  --palette emerald \
+  --font space-grotesk \
+  --describe "A minimalist invoicing tool for freelancers" \
+  # or:  --ref-url https://linear.app
+  # or:  --no-ai   (skip all OpenAI calls, use fallback copy)
+```
+
 ## Local dev (the template itself)
 
 ```bash

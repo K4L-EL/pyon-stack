@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* pyon theme: glassmorphism — frosted translucent surfaces over a vivid gradient backdrop */
+
+@layer base {
+  :root {
+    --background: 220 40% 97%;
+    --foreground: 240 20% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 20% 15%;
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 40% 96%;
+    --secondary-foreground: 240 20% 15%;
+    --muted: 220 30% 94%;
+    --muted-foreground: 240 10% 40%;
+    --accent: 199 89% 48%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 20% 90%;
+    --input: 240 20% 90%;
+    --ring: 262 83% 58%;
+    --radius: 1rem;
+    --font-sans: "Inter", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .dark {
+    --background: 240 30% 8%;
+    --foreground: 220 40% 95%;
+    --card: 240 30% 14%;
+    --card-foreground: 220 40% 95%;
+    --primary: 262 83% 68%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 30% 18%;
+    --secondary-foreground: 220 40% 95%;
+    --muted: 240 30% 18%;
+    --muted-foreground: 220 20% 70%;
+    --accent: 199 89% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 30% 25%;
+    --input: 240 30% 25%;
+    --ring: 262 83% 68%;
+  }
+  * { @apply border-border; }
+  html { font-family: var(--font-sans); }
+  body {
+    @apply text-foreground antialiased;
+    background:
+      radial-gradient(circle at 10% 10%, hsl(262 83% 70% / 0.35), transparent 40%),
+      radial-gradient(circle at 90% 20%, hsl(199 89% 60% / 0.30), transparent 45%),
+      radial-gradient(circle at 50% 95%, hsl(330 80% 70% / 0.25), transparent 50%),
+      hsl(var(--background));
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+  code, pre { font-family: var(--font-mono); }
+}
+
+@layer components {
+  .pyon-card, [data-slot="card"] {
+    background: hsl(var(--card) / 0.55) !important;
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid hsl(var(--foreground) / 0.12) !important;
+    box-shadow:
+      0 10px 40px -10px hsl(var(--foreground) / 0.15),
+      inset 0 1px 0 0 hsl(0 0% 100% / 0.25) !important;
+  }
+  .dark .pyon-card, .dark [data-slot="card"] {
+    background: hsl(var(--card) / 0.45) !important;
+    border-color: hsl(var(--foreground) / 0.10) !important;
+  }
+}

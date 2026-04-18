@@ -9,6 +9,22 @@ on:
 jobs:
   scaffold-and-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: minimalist-slate-inter
+            theme: minimalist
+            palette: slate
+            font: inter
+          - name: neo-brutalism-emerald-space
+            theme: neo-brutalism
+            palette: emerald
+            font: space-grotesk
+          - name: glassmorphism-indigo-geist
+            theme: glassmorphism
+            palette: indigo
+            font: geist
     steps:
       - name: Checkout template (for local CLI run)
         uses: actions/checkout@v4
@@ -24,7 +40,10 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Scaffold demo project via pyon CLI (local mode)
+      - name: Install jq (used by pyon CLI)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Scaffold demo project via pyon CLI (local mode, --no-ai)
         run: |
           set -euo pipefail
           chmod +x pyon-stack/cli/pyon
@@ -34,7 +53,22 @@ jobs:
             --namespace Demo \
             --db demo_app \
             --port-web 3000 --port-app 5173 --port-api 5080 --port-db 5432 \
-            --gh-owner demoorg
+            --gh-owner demoorg \
+            --theme   "${{ matrix.theme }}" \
+            --palette "${{ matrix.palette }}" \
+            --font    "${{ matrix.font }}" \
+            --no-ai
+
+      - name: Assert no placeholder tokens leaked
+        working-directory: demo
+        run: |
+          set -euo pipefail
+          if grep -RIE '__PYON_[A-Z0-9_]+__|__PYON_COPY_[A-Z0-9_]+__' \
+              --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=bin \
+              --exclude-dir=obj --exclude-dir=.next --exclude-dir=dist .; then
+            echo "ERROR: unresolved placeholder tokens left in the scaffolded project"
+            exit 1
+          fi
 
       - name: Build web + app
         working-directory: demo

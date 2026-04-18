@@ -36,9 +36,9 @@ public class DataSeeder(AppDbContext db, IConfiguration config, ILogger<DataSeed
             db.Posts.Add(new Post
             {
                 Slug = "welcome",
-                Title = "Welcome to __PYON_DISPLAY_NAME__",
-                Excerpt = "Your first post, published by the seeder.",
-                BodyMarkdown = "# Welcome\n\nEdit this post from the admin panel at `/admin/blog`.",
+                Title = "__PYON_COPY_SEED_POST_TITLE__",
+                Excerpt = "__PYON_COPY_SEED_POST_EXCERPT__",
+                BodyMarkdown = "__PYON_COPY_SEED_POST_BODY__",
                 AuthorId = admin.Id,
                 PublishedAt = DateTime.UtcNow,
             });

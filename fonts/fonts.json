@@ -1,0 +1,74 @@
+{
+  "fonts": [
+    {
+      "id": "inter",
+      "name": "Inter",
+      "kind": "sans",
+      "css_family": "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    },
+    {
+      "id": "geist",
+      "name": "Geist",
+      "kind": "sans",
+      "css_family": "'Geist', 'Inter', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&display=swap"
+    },
+    {
+      "id": "space-grotesk",
+      "name": "Space Grotesk",
+      "kind": "sans",
+      "css_family": "'Space Grotesk', 'Inter', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+    },
+    {
+      "id": "ibm-plex-sans",
+      "name": "IBM Plex Sans",
+      "kind": "sans",
+      "css_family": "'IBM Plex Sans', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap"
+    },
+    {
+      "id": "poppins",
+      "name": "Poppins",
+      "kind": "sans",
+      "css_family": "'Poppins', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap"
+    },
+    {
+      "id": "bricolage-grotesque",
+      "name": "Bricolage Grotesque",
+      "kind": "display",
+      "css_family": "'Bricolage Grotesque', 'Inter', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&display=swap"
+    },
+    {
+      "id": "playfair-display",
+      "name": "Playfair Display",
+      "kind": "serif",
+      "css_family": "'Playfair Display', Georgia, serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800&display=swap"
+    },
+    {
+      "id": "atkinson-hyperlegible",
+      "name": "Atkinson Hyperlegible",
+      "kind": "sans",
+      "css_family": "'Atkinson Hyperlegible', system-ui, sans-serif",
+      "google_url": "https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap"
+    },
+    {
+      "id": "jetbrains-mono",
+      "name": "JetBrains Mono",
+      "kind": "mono",
+      "css_family": "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      "google_url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
+    },
+    {
+      "id": "ibm-plex-mono",
+      "name": "IBM Plex Mono",
+      "kind": "mono",
+      "css_family": "'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+      "google_url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap"
+    }
+  ]
+}

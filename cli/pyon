@@ -4,9 +4,17 @@
 
 set -euo pipefail
 
-PYON_VERSION="0.1.0"
+PYON_VERSION="0.3.0"
 PYON_REPO_DEFAULT="https://github.com/K4L-EL/pyon-stack.git"
 PYON_REPO="${PYON_REPO:-$PYON_REPO_DEFAULT}"
+PYON_OPENAI_MODEL="${PYON_OPENAI_MODEL:-gpt-5.4}"
+PYON_OPENAI_FALLBACK_MODEL="${PYON_OPENAI_FALLBACK_MODEL:-gpt-4o}"
+PYON_OPENAI_URL="${PYON_OPENAI_URL:-https://api.openai.com/v1/chat/completions}"
+
+# Known IDs (kept in sync with themes/ palettes/ fonts/).
+PYON_THEMES="minimalist neo-brutalism glassmorphism claymorphism retro-synthwave terminal"
+PYON_PALETTES="slate zinc emerald rose indigo amber teal cyan"
+PYON_FONTS="inter geist space-grotesk ibm-plex-sans poppins bricolage-grotesque playfair-display atkinson-hyperlegible jetbrains-mono ibm-plex-mono"
 
 # --- pretty logging ---------------------------------------------------------
 if [ -t 1 ]; then
@@ -50,9 +58,25 @@ Options for `pyon new`:
   --template-dir <path>     Use a local directory instead of cloning
                             (env: PYON_TEMPLATE_DIR)
 
+Design:
+  --theme      <id>         One of: minimalist neo-brutalism glassmorphism
+                            claymorphism retro-synthwave terminal
+  --palette    <id|none>    One of: slate zinc emerald rose indigo amber teal cyan
+                            (or 'none' to keep the theme's own colors)
+  --font       <id>         One of: inter geist space-grotesk ibm-plex-sans poppins
+                            bricolage-grotesque playfair-display
+                            atkinson-hyperlegible jetbrains-mono ibm-plex-mono
+  --ref-url    <url>        Reference website — GPT infers full brand from it
+                            (palette + font + theme + copy/tone)
+  --describe   <text>       Product description — GPT fills placeholder copy
+  --no-ai                   Skip AI steps entirely; use picks + curated copy
+
 Environment:
   PYON_REPO                 Default template git URL
   PYON_TEMPLATE_DIR         Path to local pyon-stack checkout (skips clone)
+  PYON_OPENAI_MODEL         Model id for brand inference (default: gpt-5.4)
+  PYON_OPENAI_FALLBACK_MODEL  Fallback model if main model is unavailable (default: gpt-4o)
+  OPENAI_API_KEY            If set, used non-interactively for AI steps
 EOF
 }
 
@@ -136,6 +160,492 @@ prompt_yn() {
   case "$(lower "$reply")" in y|yes) printf 'y\n' ;; *) printf 'n\n' ;; esac
 }
 
+# Numbered multi-choice picker.
+# Usage: prompt_choice <title> <default-id> <id1> <id2> ...
+# Prints the chosen id to stdout.
+prompt_choice() {
+  local title="$1" def="$2"; shift 2
+  local ids=("$@") i=1 def_idx=1
+  if [ "${YES:-0}" = "1" ]; then
+    printf '%s\n' "$def"
+    return 0
+  fi
+  {
+    printf '%s%s%s\n' "$C_B" "$title" "$C_R"
+    for id in "${ids[@]}"; do
+      if [ "$id" = "$def" ]; then def_idx=$i; fi
+      printf '  %d) %s%s\n' "$i" "$id" "$([ "$id" = "$def" ] && printf ' (default)' || true)"
+      i=$((i+1))
+    done
+    printf 'Choose 1-%d [%d]: ' "${#ids[@]}" "$def_idx"
+  } >&2
+  local reply
+  read -r reply </dev/tty || reply=""
+  reply="${reply:-$def_idx}"
+  case "$reply" in
+    ''|*[!0-9]*) printf '%s\n' "$def"; return 0 ;;
+  esac
+  if [ "$reply" -ge 1 ] && [ "$reply" -le "${#ids[@]}" ]; then
+    printf '%s\n' "${ids[$((reply-1))]}"
+  else
+    printf '%s\n' "$def"
+  fi
+}
+
+# Silent secret prompt. Prints value to stdout, reads from /dev/tty.
+prompt_secret() {
+  local msg="$1" reply=""
+  if [ "${YES:-0}" = "1" ]; then
+    printf '\n'
+    return 0
+  fi
+  printf '%s%s%s: ' "$C_B" "$msg" "$C_R" >&2
+  # shellcheck disable=SC2162
+  (stty -echo 2>/dev/null; read reply </dev/tty; stty echo 2>/dev/null; printf '\n' >&2) \
+    || read -r reply </dev/tty || reply=""
+  # The stty subshell swallows reply; read in parent instead for reliability.
+  if [ -z "$reply" ]; then
+    stty -echo 2>/dev/null || true
+    IFS= read -r reply </dev/tty || reply=""
+    stty echo 2>/dev/null || true
+    printf '\n' >&2
+  fi
+  printf '%s' "$reply"
+}
+
+in_list() {
+  local needle="$1"; shift
+  local hay
+  for hay in "$@"; do [ "$hay" = "$needle" ] && return 0; done
+  return 1
+}
+
+# Convert a #RRGGBB (or #RGB) hex to shadcn-style HSL: "H S% L%".
+hex_to_hsl() {
+  local hex="${1#\#}"
+  if [ "${#hex}" = 3 ]; then
+    hex="${hex:0:1}${hex:0:1}${hex:1:1}${hex:1:1}${hex:2:1}${hex:2:1}"
+  fi
+  if ! [[ "$hex" =~ ^[0-9a-fA-F]{6}$ ]]; then
+    printf '0 0%% 50%%'; return 0
+  fi
+  local r g b
+  r=$((16#${hex:0:2})); g=$((16#${hex:2:2})); b=$((16#${hex:4:2}))
+  awk -v r="$r" -v g="$g" -v b="$b" 'BEGIN {
+    r=r/255; g=g/255; b=b/255;
+    max=(r>g?r:g); if(b>max)max=b;
+    min=(r<g?r:g); if(b<min)min=b;
+    l=(max+min)/2; h=0; s=0;
+    if (max != min) {
+      d=max-min;
+      s=(l>0.5)?d/(2-max-min):d/(max+min);
+      if (max==r) h=(g-b)/d + (g<b?6:0);
+      else if (max==g) h=(b-r)/d + 2;
+      else h=(r-g)/d + 4;
+      h=h*60;
+    }
+    printf "%d %d%% %d%%", int(h+0.5), int(s*100+0.5), int(l*100+0.5);
+  }'
+}
+
+# --- AI helpers -------------------------------------------------------------
+
+# Reads OpenAI key from OPENAI_API_KEY or prompts once. Echoes it. Returns 1 if
+# user declines / empty. The key is never persisted.
+ai_require_key() {
+  if [ -n "${OPENAI_API_KEY:-}" ]; then
+    printf '%s' "$OPENAI_API_KEY"; return 0
+  fi
+  if [ "${YES:-0}" = "1" ]; then return 1; fi
+  local k
+  k=$(prompt_secret "OpenAI API key (not saved)")
+  [ -z "$k" ] && return 1
+  printf '%s' "$k"
+}
+
+# ai_chat_json <key> <system> <user>  →  prints the parsed assistant JSON.
+# Uses response_format=json_object. Retries once on transient failure.
+# Falls back to $PYON_OPENAI_FALLBACK_MODEL if the primary model errors with "model_not_found".
+ai_chat_json() {
+  local key="$1" sys="$2" usr="$3"
+  local attempt=0 resp http model="$PYON_OPENAI_MODEL"
+  while [ "$attempt" -lt 3 ]; do
+    attempt=$((attempt+1))
+    local body
+    body=$(jq -n \
+      --arg model "$model" \
+      --arg sys "$sys" \
+      --arg usr "$usr" \
+      '{
+         model: $model,
+         messages: [ {role:"system", content:$sys}, {role:"user", content:$usr} ],
+         response_format: { type: "json_object" }
+       }')
+    resp=$(mktemp); http=$(mktemp)
+    local code
+    code=$(curl -sS --max-time 60 \
+      -w '%{http_code}' -o "$resp" \
+      -H "Authorization: Bearer $key" \
+      -H "Content-Type: application/json" \
+      -d "$body" \
+      "$PYON_OPENAI_URL" 2>"$http" || echo "000")
+    if [ "$code" = "200" ]; then
+      local content
+      content=$(jq -r '.choices[0].message.content // empty' <"$resp")
+      rm -f "$resp" "$http"
+      if [ -n "$content" ] && printf '%s' "$content" | jq empty >/dev/null 2>&1; then
+        printf '%s' "$content"
+        return 0
+      fi
+    else
+      if [ "$code" = "404" ] && [ "$model" != "$PYON_OPENAI_FALLBACK_MODEL" ] \
+         && jq -r '.error.code // empty' <"$resp" 2>/dev/null | grep -q 'model_not_found'; then
+        warn "Model $model not available, falling back to $PYON_OPENAI_FALLBACK_MODEL"
+        model="$PYON_OPENAI_FALLBACK_MODEL"
+        rm -f "$resp" "$http"
+        continue
+      fi
+      warn "OpenAI error (http=$code, attempt=$attempt)"
+    fi
+    rm -f "$resp" "$http"
+    sleep 2
+  done
+  return 1
+}
+
+# Fetch a URL and strip tags, keeping a readable text+inline-css slice for GPT.
+ai_fetch_clean() {
+  local url="$1" out
+  out=$(mktemp)
+  curl -sSL --max-time 20 -A "Mozilla/5.0 pyon-cli/$PYON_VERSION" "$url" -o "$out" 2>/dev/null || { rm -f "$out"; return 1; }
+  # Keep <style> blocks intact (useful for palette extraction), strip <script>,
+  # collapse tags elsewhere to plain text.
+  awk '
+    BEGIN { in_script=0 }
+    /<script[^>]*>/ { in_script=1 }
+    /<\/script>/    { in_script=0; next }
+    !in_script { print }
+  ' "$out" \
+    | sed -E 's/<[[:space:]]*br[[:space:]]*\/?[[:space:]]*>/\n/g' \
+    | perl -0777 -pe 's{<(?!style|/style)[^>]+>}{ }g; s/[[:space:]]+/ /g' 2>/dev/null \
+    | head -c 20000
+  rm -f "$out"
+}
+
+# ai_scrape_brand <key> <url>  →  full brand JSON with palette + font + theme + copy.
+ai_scrape_brand() {
+  local key="$1" url="$2" cleaned
+  cleaned=$(ai_fetch_clean "$url") || return 1
+  [ -z "$cleaned" ] && return 1
+  local sys
+  # `read -d ''` is the bash-3.2 friendly way to slurp a heredoc.
+  IFS= read -r -d '' sys <<'EOS' || true
+You are a senior brand/UI designer. Given the raw HTML+CSS of a reference
+website, extract the brand and produce ONLY a strict JSON object (no prose)
+with this exact shape:
+
+{
+  "brand_name": "string",
+  "tone": "short description of the brand voice",
+  "theme": "one of: minimalist | neo-brutalism | glassmorphism | claymorphism | retro-synthwave | terminal",
+  "font": "one of: inter | geist | space-grotesk | ibm-plex-sans | poppins | bricolage-grotesque | playfair-display | atkinson-hyperlegible | jetbrains-mono | ibm-plex-mono",
+  "palette": {
+    "light": { "background":"H S% L%","foreground":"H S% L%","primary":"H S% L%","primary-foreground":"H S% L%","secondary":"H S% L%","secondary-foreground":"H S% L%","muted":"H S% L%","muted-foreground":"H S% L%","accent":"H S% L%","accent-foreground":"H S% L%","destructive":"H S% L%","destructive-foreground":"H S% L%","border":"H S% L%","input":"H S% L%","ring":"H S% L%","card":"H S% L%","card-foreground":"H S% L%" },
+    "dark":  { "background":"H S% L%","foreground":"H S% L%","primary":"H S% L%","primary-foreground":"H S% L%","secondary":"H S% L%","secondary-foreground":"H S% L%","muted":"H S% L%","muted-foreground":"H S% L%","accent":"H S% L%","accent-foreground":"H S% L%","destructive":"H S% L%","destructive-foreground":"H S% L%","border":"H S% L%","input":"H S% L%","ring":"H S% L%","card":"H S% L%","card-foreground":"H S% L%" }
+  },
+  "copy": {
+    "HERO_TITLE": "string", "HERO_SUB": "string",
+    "HERO_CTA_PRIMARY": "string", "HERO_CTA_SECONDARY": "string",
+    "FEATURE_1_TITLE": "string", "FEATURE_1_DESC": "string",
+    "FEATURE_2_TITLE": "string", "FEATURE_2_DESC": "string",
+    "FEATURE_3_TITLE": "string", "FEATURE_3_DESC": "string",
+    "ABOUT_TITLE": "string", "ABOUT_BODY": "string",
+    "ABOUT_VALUES_TITLE": "string",
+    "ABOUT_VALUE_1": "string", "ABOUT_VALUE_2": "string", "ABOUT_VALUE_3": "string",
+    "PRICING_TITLE": "string", "PRICING_SUB": "string",
+    "PRICING_TIER_1_NAME": "string", "PRICING_TIER_1_PRICE": "string",
+    "PRICING_TIER_1_FEATURE_1": "string", "PRICING_TIER_1_FEATURE_2": "string",
+    "PRICING_TIER_2_NAME": "string", "PRICING_TIER_2_PRICE": "string",
+    "PRICING_TIER_2_FEATURE_1": "string", "PRICING_TIER_2_FEATURE_2": "string", "PRICING_TIER_2_FEATURE_3": "string",
+    "PRICING_TIER_3_NAME": "string", "PRICING_TIER_3_PRICE": "string",
+    "PRICING_TIER_3_FEATURE_1": "string", "PRICING_TIER_3_FEATURE_2": "string", "PRICING_TIER_3_FEATURE_3": "string",
+    "META_DESCRIPTION": "string",
+    "FOOTER_TAGLINE": "string",
+    "DASHBOARD_WELCOME": "string", "DASHBOARD_SUB": "string",
+    "DASHBOARD_CARD_1_TITLE": "string", "DASHBOARD_CARD_1_DESC": "string", "DASHBOARD_CARD_1_BODY": "string",
+    "DASHBOARD_CARD_2_TITLE": "string", "DASHBOARD_CARD_2_DESC": "string", "DASHBOARD_CARD_2_BODY": "string",
+    "DASHBOARD_CARD_3_TITLE": "string", "DASHBOARD_CARD_3_DESC": "string",
+    "SEED_POST_TITLE": "string", "SEED_POST_EXCERPT": "string", "SEED_POST_BODY": "string"
+  }
+}
+
+Rules:
+- Every HSL tuple MUST be "H S% L%" with H integer, S/L in percent (e.g. "240 5.9% 10%").
+- Keep copy short, concrete, in the brand's tone; use __PYON_DISPLAY_NAME__ where the product name would appear.
+- Every copy value MUST be a single line (no line breaks, no markdown headings, no \n).
+- Dashboard/seed-post copy should match the brand tone (not the source site's navigation).
+EOS
+  local user
+  user=$(printf 'Reference URL: %s\n\nCleaned markup (truncated):\n%s' "$url" "$cleaned")
+  ai_chat_json "$key" "$sys" "$user"
+}
+
+# ai_generate_copy <key> <display> <theme> <palette-id> <font-id> <description>  →  copy-only JSON
+ai_generate_copy() {
+  local key="$1" display="$2" theme="$3" palette="$4" font="$5" desc="$6"
+  local sys
+  IFS= read -r -d '' sys <<'EOS' || true
+You are a senior SaaS copywriter. Produce ONLY a strict JSON object with this
+shape (no prose, no backticks):
+
+{
+  "copy": {
+    "HERO_TITLE":"string","HERO_SUB":"string",
+    "HERO_CTA_PRIMARY":"string","HERO_CTA_SECONDARY":"string",
+    "FEATURE_1_TITLE":"string","FEATURE_1_DESC":"string",
+    "FEATURE_2_TITLE":"string","FEATURE_2_DESC":"string",
+    "FEATURE_3_TITLE":"string","FEATURE_3_DESC":"string",
+    "ABOUT_TITLE":"string","ABOUT_BODY":"string",
+    "ABOUT_VALUES_TITLE":"string",
+    "ABOUT_VALUE_1":"string","ABOUT_VALUE_2":"string","ABOUT_VALUE_3":"string",
+    "PRICING_TITLE":"string","PRICING_SUB":"string",
+    "PRICING_TIER_1_NAME":"string","PRICING_TIER_1_PRICE":"string",
+    "PRICING_TIER_1_FEATURE_1":"string","PRICING_TIER_1_FEATURE_2":"string",
+    "PRICING_TIER_2_NAME":"string","PRICING_TIER_2_PRICE":"string",
+    "PRICING_TIER_2_FEATURE_1":"string","PRICING_TIER_2_FEATURE_2":"string","PRICING_TIER_2_FEATURE_3":"string",
+    "PRICING_TIER_3_NAME":"string","PRICING_TIER_3_PRICE":"string",
+    "PRICING_TIER_3_FEATURE_1":"string","PRICING_TIER_3_FEATURE_2":"string","PRICING_TIER_3_FEATURE_3":"string",
+    "META_DESCRIPTION":"string",
+    "FOOTER_TAGLINE":"string",
+    "DASHBOARD_WELCOME":"string","DASHBOARD_SUB":"string",
+    "DASHBOARD_CARD_1_TITLE":"string","DASHBOARD_CARD_1_DESC":"string","DASHBOARD_CARD_1_BODY":"string",
+    "DASHBOARD_CARD_2_TITLE":"string","DASHBOARD_CARD_2_DESC":"string","DASHBOARD_CARD_2_BODY":"string",
+    "DASHBOARD_CARD_3_TITLE":"string","DASHBOARD_CARD_3_DESC":"string",
+    "SEED_POST_TITLE":"string","SEED_POST_EXCERPT":"string","SEED_POST_BODY":"string"
+  }
+}
+
+Use __PYON_DISPLAY_NAME__ wherever the product name would appear. Keep the
+tone, density, and punctuation consistent with the described product and the
+chosen visual theme. Keep CTA buttons under 3 words. Every value MUST be a
+single line (no line breaks, no markdown headings, no \n escapes).
+EOS
+  local user
+  user=$(printf 'Product name: %s\nVisual theme: %s\nPalette: %s\nFont: %s\n\nProduct description:\n%s' \
+    "$display" "$theme" "$palette" "$font" "$desc")
+  ai_chat_json "$key" "$sys" "$user"
+}
+
+# --- apply ------------------------------------------------------------------
+
+apply_theme() {
+  local proj="$1" theme="$2"
+  local src="$proj/themes/$theme/theme.css"
+  [ -f "$src" ] || die "Theme not found: $theme"
+  cp "$src" "$proj/apps/web/src/app/globals.css"
+  cp "$src" "$proj/apps/app/src/index.css"
+  sed_inplace "s/__PYON_THEME__/$theme/g" "$proj/apps/web/src/app/layout.tsx"
+  sed_inplace "s/__PYON_THEME__/$theme/g" "$proj/apps/app/index.html"
+}
+
+# Overlay palette (from file OR inline JSON via stdin when file is "-") on both
+# CSS entry points. Idempotent when called once per scaffold.
+apply_palette() {
+  local proj="$1" src="$2"   # src = path to palette JSON, or "none"
+  [ "$src" = "none" ] && return 0
+  [ -f "$src" ] || die "Palette file not found: $src"
+  local web="$proj/apps/web/src/app/globals.css"
+  local app="$proj/apps/app/src/index.css"
+  local light_block dark_block
+  light_block=$(jq -r '
+    .light // {} | to_entries
+    | map("    --" + .key + ": " + .value + ";") | .[]
+  ' <"$src")
+  dark_block=$(jq -r '
+    .dark // {} | to_entries
+    | map("    --" + .key + ": " + .value + ";") | .[]
+  ' <"$src")
+  local overlay
+  overlay=$(cat <<EOF
+
+/* pyon palette overlay */
+@layer base {
+  :root {
+$light_block
+  }
+  .dark {
+$dark_block
+  }
+}
+EOF
+)
+  printf '%s\n' "$overlay" >> "$web"
+  printf '%s\n' "$overlay" >> "$app"
+}
+
+# Insert Google Fonts link + override --font-sans/--font-mono.
+apply_font() {
+  local proj="$1" font="$2"
+  [ "$font" = "none" ] && return 0
+  local reg="$proj/fonts/fonts.json"
+  [ -f "$reg" ] || die "fonts registry missing at $reg"
+  local url family kind
+  url=$(jq -r --arg id "$font" '.fonts[] | select(.id==$id) | .google_url // empty' <"$reg")
+  family=$(jq -r --arg id "$font" '.fonts[] | select(.id==$id) | .css_family // empty' <"$reg")
+  kind=$(jq -r --arg id "$font" '.fonts[] | select(.id==$id) | .kind // "sans"' <"$reg")
+  [ -z "$url" ] && die "Unknown font: $font"
+  local link_tsx link_html esc_url esc_family
+  esc_url=$(printf '%s' "$url" | sed -e 's/[\/&]/\\&/g')
+  esc_family=$(printf '%s' "$family" | sed -e 's/[\/&]/\\&/g')
+
+  # Next.js layout.tsx
+  link_tsx='<link rel="preconnect" href="https:\/\/fonts.googleapis.com" \/><link rel="preconnect" href="https:\/\/fonts.gstatic.com" crossOrigin="anonymous" \/><link rel="stylesheet" href="'"$esc_url"'" \/>'
+  sed_inplace "s|{/\* __PYON_FONT_LINK__ \*/}|$link_tsx|" "$proj/apps/web/src/app/layout.tsx"
+
+  # Vite index.html
+  link_html='<link rel="preconnect" href="https:\/\/fonts.googleapis.com"><link rel="preconnect" href="https:\/\/fonts.gstatic.com" crossorigin><link rel="stylesheet" href="'"$esc_url"'">'
+  sed_inplace "s|<!-- __PYON_FONT_LINK__ -->|$link_html|" "$proj/apps/app/index.html"
+
+  # CSS var override
+  local override
+  if [ "$kind" = "mono" ]; then
+    override=$(printf '\n@layer base { :root { --font-mono: %s; } }\n' "$family")
+  else
+    override=$(printf '\n@layer base { :root { --font-sans: %s; } }\n' "$family")
+  fi
+  printf '%s' "$override" >> "$proj/apps/web/src/app/globals.css"
+  printf '%s' "$override" >> "$proj/apps/app/src/index.css"
+}
+
+# Substitute every __PYON_COPY_<KEY>__ placeholder using an object under the
+# top-level "copy" field in the given JSON (or the object itself if flat).
+apply_copy() {
+  local proj="$1" src="$2"
+  [ -f "$src" ] || die "Copy JSON not found: $src"
+  # Normalise to a flat object: prefer .copy, else the whole object (minus _description).
+  local flat
+  flat=$(jq '.copy // (. | del(.["_description"]))' <"$src")
+  # Find files with any __PYON_COPY_*__ tokens.
+  local targets
+  targets=$(mktemp)
+  ( cd "$proj" && grep -rlE '__PYON_COPY_[A-Z0-9_]+__' \
+      --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=bin \
+      --exclude-dir=obj --exclude-dir=.next --exclude-dir=dist \
+      --exclude-dir=themes --exclude-dir=palettes --exclude-dir=fonts \
+      --exclude-dir=cli . 2>/dev/null || true ) > "$targets"
+
+  # Build a sed script: one s///g per copy key. We flatten any embedded
+  # newlines to a single space because BSD sed interprets `\n` in the
+  # replacement as a real newline, which would corrupt C# double-quoted
+  # strings and JSX attribute values.
+  local sed_script
+  sed_script=$(mktemp)
+  jq -r '
+    to_entries[]
+    | "s|__PYON_COPY_" + .key + "__|" +
+      ( .value
+        | gsub("\r"; "")
+        | gsub("\n"; " ")
+        | gsub("\\\\"; "\\\\\\\\")
+        | gsub("&"; "\\&")
+        | gsub("\\|"; "\\|")
+      ) + "|g"
+  ' <<<"$flat" > "$sed_script"
+
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    local f="$proj/$rel"
+    [ -f "$f" ] || continue
+    if sed --version >/dev/null 2>&1; then
+      sed -i -f "$sed_script" "$f"
+    else
+      sed -i '' -f "$sed_script" "$f"
+    fi
+  done < "$targets"
+  rm -f "$targets" "$sed_script"
+}
+
+# Merge a full-brand JSON (from ai_scrape_brand) into explicit vars.
+# Writes chosen theme, font, palette-file-path, copy-file-path to caller.
+# Sets globals: CHOSEN_THEME CHOSEN_FONT PALETTE_FILE COPY_FILE
+digest_brand_json() {
+  local proj="$1" brand_json_path="$2"
+  local theme font
+  theme=$(jq -r '.theme // empty' <"$brand_json_path")
+  font=$(jq -r  '.font // empty'  <"$brand_json_path")
+  if in_list "$theme" $PYON_THEMES; then CHOSEN_THEME="$theme"; fi
+  if in_list "$font"  $PYON_FONTS;  then CHOSEN_FONT="$font";  fi
+  # Palette: extract .palette subtree as a palette JSON file.
+  PALETTE_FILE="$proj/.pyon-palette.json"
+  jq '.palette // {}' <"$brand_json_path" > "$PALETTE_FILE"
+  # Copy: extract .copy subtree.
+  COPY_FILE="$proj/.pyon-copy.json"
+  jq '{copy: (.copy // {})}' <"$brand_json_path" > "$COPY_FILE"
+}
+
+# Merge (overlay) a generated copy JSON onto the fallback copy so every key is
+# populated. Writes result to $out.
+merge_copy() {
+  local fallback="$1" generated="$2" out="$3"
+  # Both .copy or flat.
+  local fb gen
+  fb=$(jq '.copy // (. | del(.["_description"]))' <"$fallback")
+  gen=$(jq '.copy // .' <"$generated")
+  jq -n --argjson fb "$fb" --argjson gen "$gen" '{copy: ($fb + $gen)}' > "$out"
+}
+
+# Synthesize a palette JSON from 3 hex inputs (primary / background / accent).
+palette_from_hex() {
+  local primary="$1" background="$2" accent="$3" out="$4"
+  local p_hsl b_hsl a_hsl
+  p_hsl=$(hex_to_hsl "$primary")
+  b_hsl=$(hex_to_hsl "$background")
+  a_hsl=$(hex_to_hsl "$accent")
+  cat >"$out" <<EOF
+{
+  "name": "Custom",
+  "light": {
+    "background": "$b_hsl",
+    "foreground": "240 10% 3.9%",
+    "card": "$b_hsl",
+    "card-foreground": "240 10% 3.9%",
+    "primary": "$p_hsl",
+    "primary-foreground": "0 0% 100%",
+    "secondary": "240 4.8% 95.9%",
+    "secondary-foreground": "240 5.9% 10%",
+    "muted": "240 4.8% 95.9%",
+    "muted-foreground": "240 3.8% 46.1%",
+    "accent": "$a_hsl",
+    "accent-foreground": "0 0% 100%",
+    "destructive": "0 84.2% 60.2%",
+    "destructive-foreground": "0 0% 98%",
+    "border": "240 5.9% 90%",
+    "input": "240 5.9% 90%",
+    "ring": "$p_hsl"
+  },
+  "dark": {
+    "background": "240 10% 3.9%",
+    "foreground": "0 0% 98%",
+    "card": "240 10% 6%",
+    "card-foreground": "0 0% 98%",
+    "primary": "$p_hsl",
+    "primary-foreground": "0 0% 100%",
+    "secondary": "240 3.7% 15.9%",
+    "secondary-foreground": "0 0% 98%",
+    "muted": "240 3.7% 15.9%",
+    "muted-foreground": "240 5% 64.9%",
+    "accent": "$a_hsl",
+    "accent-foreground": "0 0% 100%",
+    "destructive": "0 62.8% 30.6%",
+    "destructive-foreground": "0 0% 98%",
+    "border": "240 3.7% 15.9%",
+    "input": "240 3.7% 15.9%",
+    "ring": "$p_hsl"
+  }
+}
+EOF
+}
+
 # --- commands ---------------------------------------------------------------
 
 cmd_version() { printf 'pyon %s\n' "$PYON_VERSION"; }
@@ -144,6 +654,7 @@ cmd_new() {
   local name="" display="" ns="" db=""
   local port_web="3000" port_app="5173" port_api="5080" port_db="5432"
   local gh_owner="" create_repo="" run_up="" template_dir="${PYON_TEMPLATE_DIR:-}"
+  local theme="" palette="" font="" ref_url="" description="" no_ai=""
   YES=0
 
   # parse flags
@@ -164,6 +675,12 @@ cmd_new() {
       --no-up) run_up="n" ;;
       --repo) PYON_REPO="$2"; shift ;;
       --template-dir) template_dir="$2"; shift ;;
+      --theme) theme="$2"; shift ;;
+      --palette) palette="$2"; shift ;;
+      --font) font="$2"; shift ;;
+      --ref-url) ref_url="$2"; shift ;;
+      --describe) description="$2"; shift ;;
+      --no-ai) no_ai="1" ;;
       -h|--help) usage; return 0 ;;
       -*) die "Unknown flag: $1 (try --help)" ;;
       *) if [ -z "$name" ]; then name="$1"; else die "Unexpected argument: $1"; fi ;;
@@ -174,7 +691,20 @@ cmd_new() {
   # preflight
   require git
   require tar
+  require jq
+  require curl
   if [ -z "$template_dir" ]; then require git; fi
+
+  # Validate design flags where provided up-front.
+  if [ -n "$theme" ] && ! in_list "$theme" $PYON_THEMES; then
+    die "Unknown --theme: $theme (valid: $PYON_THEMES)"
+  fi
+  if [ -n "$palette" ] && [ "$palette" != "none" ] && ! in_list "$palette" $PYON_PALETTES; then
+    die "Unknown --palette: $palette (valid: none $PYON_PALETTES)"
+  fi
+  if [ -n "$font" ] && ! in_list "$font" $PYON_FONTS; then
+    die "Unknown --font: $font (valid: $PYON_FONTS)"
+  fi
 
   say "PYON stack — new project"
 
@@ -202,6 +732,59 @@ cmd_new() {
   [ -z "$create_repo" ] && create_repo=$(prompt_yn "Create GitHub repo with 'gh' now?" "n")
   [ -z "$run_up" ] && run_up=$(prompt_yn "Run 'docker compose up -d' after scaffold?" "n")
 
+  # --- design picks --------------------------------------------------------
+  local palette_mode="preset"
+  local hex_primary="" hex_background="" hex_accent=""
+
+  [ -z "$theme" ] && theme=$(prompt_choice "Design style" "minimalist" $PYON_THEMES)
+
+  # Palette mode
+  if [ -z "$palette" ]; then
+    palette_mode=$(prompt_choice "Color palette source" "preset" preset theme-default hex url)
+    case "$palette_mode" in
+      preset) palette=$(prompt_choice "Preset palette" "slate" $PYON_PALETTES) ;;
+      theme-default) palette="none" ;;
+      hex)
+        hex_primary=$(prompt    "Primary hex (e.g. #4f46e5)"   "#4f46e5")
+        hex_background=$(prompt "Background hex"               "#ffffff")
+        hex_accent=$(prompt     "Accent hex"                   "#22c55e")
+        ;;
+      url)
+        ref_url=${ref_url:-$(prompt "Reference website URL" "")}
+        ;;
+    esac
+  fi
+
+  # Font
+  if [ -z "$font" ]; then
+    font=$(prompt_choice "Font" "inter" $PYON_FONTS)
+  fi
+
+  # Copy source: description or ref URL (if not already set).
+  if [ -z "$description" ] && [ -z "$ref_url" ]; then
+    if [ "$YES" != "1" ]; then
+      description=$(prompt "Describe your product (or leave blank)" "")
+      if [ -z "$description" ]; then
+        ref_url=$(prompt "…or paste a reference URL (or leave blank)" "")
+      fi
+    fi
+  fi
+
+  # Decide whether AI is needed.
+  local need_ai=0
+  [ "$palette_mode" = "url" ] && need_ai=1
+  [ -n "$ref_url" ] && need_ai=1
+  [ -n "$description" ] && need_ai=1
+  [ "$no_ai" = "1" ] && need_ai=0
+
+  local openai_key=""
+  if [ "$need_ai" = "1" ]; then
+    if ! openai_key=$(ai_require_key); then
+      warn "No OpenAI key — skipping AI steps, using picks + curated fallback copy."
+      need_ai=0
+    fi
+  fi
+
   local jwt year
   jwt=$(rand_hex)
   year=$(date +%Y)
@@ -222,6 +805,86 @@ cmd_new() {
     git clone --depth=1 "$PYON_REPO" "$name" >/dev/null
     rm -rf "$name/.git"
   fi
+
+  # --- design: AI inference + apply ----------------------------------------
+  CHOSEN_THEME="$theme"
+  CHOSEN_FONT="$font"
+  PALETTE_FILE=""
+  COPY_FILE=""
+
+  if [ "$need_ai" = "1" ] && [ -n "$ref_url" ]; then
+    say "Asking $PYON_OPENAI_MODEL to read $ref_url ..."
+    local brand_json
+    brand_json=$(mktemp)
+    if ai_scrape_brand "$openai_key" "$ref_url" > "$brand_json" 2>/dev/null \
+        && jq empty < "$brand_json" >/dev/null 2>&1; then
+      digest_brand_json "$name" "$brand_json"
+      # If the user explicitly passed --theme/--palette/--font those win over GPT.
+      [ -n "$theme" ] && CHOSEN_THEME="$theme"
+      [ -n "$font" ]  && CHOSEN_FONT="$font"
+      if [ -n "$palette" ] && [ "$palette" != "none" ]; then
+        PALETTE_FILE="$name/palettes/$palette.json"
+      fi
+      ok "Brand inferred: theme=$CHOSEN_THEME font=$CHOSEN_FONT"
+    else
+      warn "Brand scrape failed — using picks + fallback copy."
+      need_ai=0
+    fi
+    rm -f "$brand_json"
+  fi
+
+  if [ "$need_ai" = "1" ] && [ -n "$description" ] && [ -z "$COPY_FILE" ]; then
+    say "Asking $PYON_OPENAI_MODEL to write copy ..."
+    local copy_json
+    copy_json=$(mktemp)
+    if ai_generate_copy "$openai_key" "$display" "$CHOSEN_THEME" "${palette:-none}" "$CHOSEN_FONT" "$description" > "$copy_json" 2>/dev/null \
+        && jq empty < "$copy_json" >/dev/null 2>&1; then
+      COPY_FILE="$name/.pyon-copy.json"
+      mv "$copy_json" "$COPY_FILE"
+      ok "Copy generated."
+    else
+      warn "Copy generation failed — using curated fallback."
+      rm -f "$copy_json"
+    fi
+  fi
+
+  # If no PALETTE_FILE yet, resolve from --palette flag / preset pick / hex.
+  if [ -z "$PALETTE_FILE" ]; then
+    case "${palette_mode:-preset}" in
+      hex)
+        PALETTE_FILE="$name/.pyon-palette.json"
+        palette_from_hex "$hex_primary" "$hex_background" "$hex_accent" "$PALETTE_FILE"
+        ;;
+      *)
+        if [ -z "$palette" ] || [ "$palette" = "none" ]; then
+          PALETTE_FILE="none"
+        else
+          PALETTE_FILE="$name/palettes/$palette.json"
+        fi
+        ;;
+    esac
+  fi
+
+  say "Applying theme '$CHOSEN_THEME' ..."
+  apply_theme "$name" "$CHOSEN_THEME"
+
+  if [ "$PALETTE_FILE" != "none" ]; then
+    say "Applying palette ..."
+    apply_palette "$name" "$PALETTE_FILE"
+  fi
+
+  say "Applying font '$CHOSEN_FONT' ..."
+  apply_font "$name" "$CHOSEN_FONT"
+
+  # Copy: merge AI-generated (if any) with curated fallback so every slot fills.
+  local merged_copy="$name/.pyon-copy-merged.json"
+  if [ -n "$COPY_FILE" ] && [ -f "$COPY_FILE" ]; then
+    merge_copy "$name/cli/fallbacks/copy.json" "$COPY_FILE" "$merged_copy"
+  else
+    cp "$name/cli/fallbacks/copy.json" "$merged_copy"
+  fi
+  say "Applying copy ..."
+  apply_copy "$name" "$merged_copy"
 
   # --- rewrite tokens -------------------------------------------------------
   say "Rewriting placeholders ..."
@@ -303,8 +966,10 @@ cmd_new() {
 
   # Drop pyon-only assets from the generated project.
   rm -rf "$name/cli" "$name/install.sh"
-  # The template's own CI workflow isn't meaningful in a new project.
-  rm -f  "$name/.github/workflows/cli-smoke.yml"
+  rm -rf "$name/themes" "$name/palettes" "$name/fonts"
+  rm -f  "$name/.pyon-copy.json" "$name/.pyon-copy-merged.json" "$name/.pyon-palette.json"
+  # The template's own CI workflows aren't meaningful in a new project.
+  rm -f  "$name/.github/workflows/cli-smoke.yml" "$name/.github/workflows/ci.yml"
 
   # --- git init -------------------------------------------------------------
   say "Initializing git ..."

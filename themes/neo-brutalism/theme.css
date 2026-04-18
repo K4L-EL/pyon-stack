@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* pyon theme: neo-brutalism — chunky borders, hard shadows, square corners, high contrast */
+
+@layer base {
+  :root {
+    --background: 54 100% 92%;
+    --foreground: 0 0% 0%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 0%;
+    --primary: 240 100% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 54 100% 60%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 30%;
+    --accent: 320 100% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 0%;
+    --input: 0 0% 0%;
+    --ring: 0 0% 0%;
+    --radius: 0rem;
+    --font-sans: "Space Grotesk", "Archivo", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+  .dark {
+    --background: 0 0% 10%;
+    --foreground: 54 100% 92%;
+    --card: 0 0% 15%;
+    --card-foreground: 54 100% 92%;
+    --primary: 54 100% 60%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 320 100% 60%;
+    --secondary-foreground: 0 0% 0%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 80%;
+    --accent: 180 100% 50%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 54 100% 92%;
+    --input: 54 100% 92%;
+    --ring: 54 100% 92%;
+  }
+  * { @apply border-border; }
+  html { font-family: var(--font-sans); }
+  body {
+    @apply bg-background text-foreground;
+    font-weight: 500;
+  }
+  code, pre { font-family: var(--font-mono); }
+  h1, h2, h3, h4 { font-weight: 800; letter-spacing: -0.02em; }
+}
+
+@layer components {
+  button, [role="button"], .pyon-card {
+    border-width: 2px !important;
+    border-style: solid !important;
+    border-color: hsl(var(--foreground)) !important;
+    border-radius: 0 !important;
+    box-shadow: 4px 4px 0 0 hsl(var(--foreground)) !important;
+    transition: transform 80ms ease, box-shadow 80ms ease !important;
+  }
+  button:hover, [role="button"]:hover, .pyon-card:hover {
+    transform: translate(-1px, -1px);
+    box-shadow: 5px 5px 0 0 hsl(var(--foreground)) !important;
+  }
+  button:active, [role="button"]:active {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 0 hsl(var(--foreground)) !important;
+  }
+  input, textarea {
+    border-width: 2px !important;
+    border-color: hsl(var(--foreground)) !important;
+    border-radius: 0 !important;
+  }
+}

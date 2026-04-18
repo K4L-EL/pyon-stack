@@ -3,17 +3,40 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { buttonVariants } from "@/components/ui/button";
 
 const tiers = [
-  { name: "Starter", price: "$0", features: ["Up to 3 users", "Community support"] },
-  { name: "Team", price: "$29", features: ["Unlimited users", "Email support", "Admin panel"] },
-  { name: "Enterprise", price: "Contact", features: ["SSO", "SLA", "Dedicated support"] },
+  {
+    name: "__PYON_COPY_PRICING_TIER_1_NAME__",
+    price: "__PYON_COPY_PRICING_TIER_1_PRICE__",
+    features: [
+      "__PYON_COPY_PRICING_TIER_1_FEATURE_1__",
+      "__PYON_COPY_PRICING_TIER_1_FEATURE_2__",
+    ],
+  },
+  {
+    name: "__PYON_COPY_PRICING_TIER_2_NAME__",
+    price: "__PYON_COPY_PRICING_TIER_2_PRICE__",
+    features: [
+      "__PYON_COPY_PRICING_TIER_2_FEATURE_1__",
+      "__PYON_COPY_PRICING_TIER_2_FEATURE_2__",
+      "__PYON_COPY_PRICING_TIER_2_FEATURE_3__",
+    ],
+  },
+  {
+    name: "__PYON_COPY_PRICING_TIER_3_NAME__",
+    price: "__PYON_COPY_PRICING_TIER_3_PRICE__",
+    features: [
+      "__PYON_COPY_PRICING_TIER_3_FEATURE_1__",
+      "__PYON_COPY_PRICING_TIER_3_FEATURE_2__",
+      "__PYON_COPY_PRICING_TIER_3_FEATURE_3__",
+    ],
+  },
 ];
 
 export default function PricingPage() {
   return (
     <div className="container py-16">
       <div className="text-center max-w-2xl mx-auto">
-        <h1 className="text-4xl font-semibold tracking-tight">Pricing</h1>
-        <p className="mt-4 text-muted-foreground">Simple plans. Cancel anytime.</p>
+        <h1 className="text-4xl font-semibold tracking-tight">__PYON_COPY_PRICING_TITLE__</h1>
+        <p className="mt-4 text-muted-foreground">__PYON_COPY_PRICING_SUB__</p>
       </div>
       <div className="mt-12 grid gap-6 md:grid-cols-3 max-w-5xl mx-auto">
         {tiers.map((t) => (

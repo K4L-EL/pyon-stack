@@ -6,23 +6,22 @@ export default function HomePage() {
     <div className="container py-24">
       <div className="mx-auto max-w-3xl text-center space-y-6">
         <h1 className="text-5xl font-semibold tracking-tight">
-          __PYON_DISPLAY_NAME__
+          __PYON_COPY_HERO_TITLE__
         </h1>
         <p className="text-lg text-muted-foreground">
-          A modern full-stack starter. Next.js marketing, a Vite dashboard with admin &amp; CMS,
-          an ASP.NET Core API on Postgres, and Terraform infrastructure — ready in one command.
+          __PYON_COPY_HERO_SUB__
         </p>
         <div className="flex items-center justify-center gap-3">
-          <Link href="/signup" className={buttonVariants()}>Get started</Link>
-          <Link href="/blog" className={buttonVariants({ variant: "outline" })}>Read the blog</Link>
+          <Link href="/signup" className={buttonVariants()}>__PYON_COPY_HERO_CTA_PRIMARY__</Link>
+          <Link href="/blog" className={buttonVariants({ variant: "outline" })}>__PYON_COPY_HERO_CTA_SECONDARY__</Link>
         </div>
       </div>
 
       <div className="mt-24 grid gap-6 md:grid-cols-3">
         {[
-          { t: "Ship fast", d: "Batteries-included auth, admin, and CMS." },
-          { t: "Typed end-to-end", d: "TypeScript + C# + EF Core, one source of truth." },
-          { t: "Deploy anywhere", d: "Terraform + Docker. Bring your own cloud." },
+          { t: "__PYON_COPY_FEATURE_1_TITLE__", d: "__PYON_COPY_FEATURE_1_DESC__" },
+          { t: "__PYON_COPY_FEATURE_2_TITLE__", d: "__PYON_COPY_FEATURE_2_DESC__" },
+          { t: "__PYON_COPY_FEATURE_3_TITLE__", d: "__PYON_COPY_FEATURE_3_DESC__" },
         ].map((f) => (
           <div key={f.t} className="rounded-xl border p-6">
             <h3 className="font-semibold">{f.t}</h3>

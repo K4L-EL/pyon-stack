@@ -4,12 +4,15 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "__PYON_DISPLAY_NAME__",
-  description: "__PYON_DISPLAY_NAME__ — built on the PYON stack.",
+  description: "__PYON_COPY_META_DESCRIPTION__",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" data-pyon-theme="__PYON_THEME__">
+      <head>
+        {/* __PYON_FONT_LINK__ */}
+      </head>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <header className="border-b">
           <div className="container flex h-14 items-center justify-between">
@@ -31,7 +34,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main>{children}</main>
         <footer className="border-t py-8 mt-16">
           <div className="container text-sm text-muted-foreground">
-            © {new Date().getFullYear()} __PYON_DISPLAY_NAME__
+            <div>© {new Date().getFullYear()} __PYON_DISPLAY_NAME__</div>
+            <div className="mt-1">__PYON_COPY_FOOTER_TAGLINE__</div>
           </div>
         </footer>
       </body>

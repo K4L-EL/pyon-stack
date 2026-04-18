@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* pyon theme: claymorphism — soft pastels, dual shadows, generous radius, 3D squish */
+
+@layer base {
+  :root {
+    --background: 30 40% 96%;
+    --foreground: 25 25% 20%;
+    --card: 30 40% 98%;
+    --card-foreground: 25 25% 20%;
+    --primary: 15 85% 62%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 200 70% 80%;
+    --secondary-foreground: 25 25% 20%;
+    --muted: 30 30% 92%;
+    --muted-foreground: 25 15% 45%;
+    --accent: 280 60% 75%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 25% 85%;
+    --input: 30 25% 88%;
+    --ring: 15 85% 62%;
+    --radius: 1.25rem;
+    --font-sans: "Poppins", "Nunito", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  .dark {
+    --background: 25 15% 15%;
+    --foreground: 30 30% 92%;
+    --card: 25 15% 20%;
+    --card-foreground: 30 30% 92%;
+    --primary: 15 85% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 200 50% 45%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 25 15% 22%;
+    --muted-foreground: 30 20% 75%;
+    --accent: 280 50% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 25 15% 28%;
+    --input: 25 15% 28%;
+    --ring: 15 85% 65%;
+  }
+  * { @apply border-border; }
+  html { font-family: var(--font-sans); }
+  body { @apply bg-background text-foreground antialiased; font-weight: 500; }
+  code, pre { font-family: var(--font-mono); }
+}
+
+@layer components {
+  .pyon-card, [data-slot="card"] {
+    border-radius: var(--radius) !important;
+    border: none !important;
+    box-shadow:
+      12px 12px 24px hsl(25 20% 78% / 0.55),
+      -6px -6px 18px hsl(0 0% 100% / 0.85) !important;
+  }
+  .dark .pyon-card, .dark [data-slot="card"] {
+    box-shadow:
+      10px 10px 20px hsl(0 0% 0% / 0.45),
+      -4px -4px 14px hsl(30 15% 30% / 0.3) !important;
+  }
+  button, [role="button"] {
+    border-radius: calc(var(--radius) - 0.25rem) !important;
+    box-shadow:
+      6px 6px 12px hsl(25 20% 78% / 0.55),
+      -3px -3px 10px hsl(0 0% 100% / 0.85) !important;
+    transition: transform 150ms ease, box-shadow 150ms ease !important;
+  }
+  button:active, [role="button"]:active {
+    transform: translateY(1px);
+    box-shadow:
+      inset 3px 3px 8px hsl(25 20% 70% / 0.6),
+      inset -2px -2px 6px hsl(0 0% 100% / 0.6) !important;
+  }
+}
