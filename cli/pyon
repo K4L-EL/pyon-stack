@@ -494,9 +494,8 @@ apply_font() {
   family=$(jq -r --arg id "$font" '.fonts[] | select(.id==$id) | .css_family // empty' <"$reg")
   kind=$(jq -r --arg id "$font" '.fonts[] | select(.id==$id) | .kind // "sans"' <"$reg")
   [ -z "$url" ] && die "Unknown font: $font"
-  local link_tsx link_html esc_url esc_family
+  local link_tsx link_html esc_url
   esc_url=$(printf '%s' "$url" | sed -e 's/[\/&]/\\&/g')
-  esc_family=$(printf '%s' "$family" | sed -e 's/[\/&]/\\&/g')
 
   # Next.js layout.tsx
   link_tsx='<link rel="preconnect" href="https:\/\/fonts.googleapis.com" \/><link rel="preconnect" href="https:\/\/fonts.gstatic.com" crossOrigin="anonymous" \/><link rel="stylesheet" href="'"$esc_url"'" \/>'
@@ -968,6 +967,11 @@ cmd_new() {
   rm -rf "$name/cli" "$name/install.sh"
   rm -rf "$name/themes" "$name/palettes" "$name/fonts"
   rm -f  "$name/.pyon-copy.json" "$name/.pyon-copy-merged.json" "$name/.pyon-palette.json"
+  # docs/THEMES.md is template-internal documentation about pyon's design
+  # system; scaffolded projects don't need it (they get their own README
+  # and the design choices are already baked in).
+  rm -f  "$name/docs/THEMES.md"
+  rmdir "$name/docs" 2>/dev/null || true
   # The template's own CI workflows aren't meaningful in a new project.
   rm -f  "$name/.github/workflows/cli-smoke.yml" "$name/.github/workflows/ci.yml"
 

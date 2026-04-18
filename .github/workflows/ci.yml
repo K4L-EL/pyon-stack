@@ -14,7 +14,10 @@ jobs:
       - name: Shellcheck CLI + installer
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck cli/pyon install.sh
+          # -S warning: skip "info"-level findings (e.g. SC2086 word-splitting
+          # for $PYON_THEMES, $PYON_FONTS positional-arg lists, and SC2015
+          # `A && B || C` patterns where C is intentionally `true`/no-op).
+          shellcheck -S warning cli/pyon install.sh
 
   template-sanity:
     runs-on: ubuntu-latest
