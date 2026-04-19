@@ -463,6 +463,21 @@ port_in_use() {
   return 1
 }
 
+# Find the first free TCP port >= start_port, trying up to max_steps numbers.
+# Echoes the free port on stdout, or exits non-zero if none found.
+find_free_port() {
+  local start="$1" max="${2:-100}" p="$1" end
+  end=$((start + max))
+  while [ "$p" -lt "$end" ]; do
+    if ! port_in_use "$p"; then
+      printf '%s\n' "$p"
+      return 0
+    fi
+    p=$((p + 1))
+  done
+  return 1
+}
+
 # Check every host port we're about to publish. Returns non-zero if any are
 # busy and prints a structured report (with lsof hint) so the user can fix it
 # before we start a ~2-minute docker build for nothing.
@@ -1212,18 +1227,37 @@ cmd_new() {
     up_tried="y"
     if ! command -v docker >/dev/null 2>&1; then
       warn "docker not found — skipping 'docker compose up'"
-    elif ! check_host_ports \
+    else
+      # Postgres runs inside the compose network; api/web/app talk to it at
+      # postgres:5432 regardless of the host-side mapping. If the chosen host
+      # port is already in use on the machine (very common — Homebrew or
+      # another Docker project), transparently remap the *published* port to
+      # the next free one so we don't block the whole stack.
+      local new_db_port=""
+      if port_in_use "$port_db"; then
+        new_db_port=$(find_free_port $((port_db + 1)) 100 || true)
+        if [ -n "$new_db_port" ]; then
+          sed_inplace "s|\"$port_db:5432\"|\"$new_db_port:5432\"|" \
+            "$name/docker/docker-compose.yml"
+          warn "Host port $port_db is busy (likely a local Postgres) — publishing the Docker Postgres on $new_db_port instead."
+          port_db="$new_db_port"
+        else
+          warn "Couldn't find a free port near $port_db for Postgres; leaving the mapping as-is (docker may fail to bind)."
+        fi
+      fi
+
+      if ! check_host_ports \
             "marketing site" "$port_web" \
             "dashboard"      "$port_app" \
-            "API"            "$port_api" \
-            "Postgres"       "$port_db"; then
-      warn "Skipping 'docker compose up' until the port conflict(s) are resolved."
-    else
-      say "Starting docker compose (this may take a few minutes on first build) ..."
-      if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
-        up_ok="y"
+            "API"            "$port_api"; then
+        warn "Skipping 'docker compose up' until the port conflict(s) are resolved."
       else
-        warn "docker compose failed — see output above."
+        say "Starting docker compose (this may take a few minutes on first build) ..."
+        if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
+          up_ok="y"
+        else
+          warn "docker compose failed — see output above."
+        fi
       fi
     fi
   fi
