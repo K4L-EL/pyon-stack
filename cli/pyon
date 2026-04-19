@@ -455,6 +455,52 @@ ai_chat_json() {
 # Poll an HTTP URL until it returns 2xx/3xx, or until the timeout elapses.
 # Usage: wait_http <url> <timeout-seconds> [label]
 # Writes a one-line progress indicator while waiting.
+# Returns 0 if something is already listening on the given host TCP port.
+# Uses bash's built-in /dev/tcp, so no external tools needed.
+port_in_use() {
+  local port="$1"
+  (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null && { exec 3<&- 2>/dev/null; return 0; }
+  return 1
+}
+
+# Check every host port we're about to publish. Returns non-zero if any are
+# busy and prints a structured report (with lsof hint) so the user can fix it
+# before we start a ~2-minute docker build for nothing.
+check_host_ports() {
+  local label ports=() busy=() p pid entry
+  # Args come in (label,port) pairs: check_host_ports "web" 3000 "db" 5432 ...
+  while [ $# -gt 0 ]; do
+    ports+=("$1:$2")
+    shift 2
+  done
+  for entry in "${ports[@]}"; do
+    label="${entry%%:*}"; p="${entry##*:}"
+    if port_in_use "$p"; then
+      busy+=("$label:$p")
+    fi
+  done
+  [ "${#busy[@]}" -eq 0 ] && return 0
+
+  warn "The following host ports are already in use:"
+  for entry in "${busy[@]}"; do
+    label="${entry%%:*}"; p="${entry##*:}"
+    pid=""
+    if command -v lsof >/dev/null 2>&1; then
+      pid=$(lsof -iTCP:"$p" -sTCP:LISTEN -Pn 2>/dev/null | awk 'NR==2{printf "%s (pid %s)", $1, $2}')
+    fi
+    if [ -n "$pid" ]; then
+      printf '    %sport %s%s used by %s — needed for %s\n' "$C_YEL" "$p" "$C_R" "$pid" "$label" >&2
+    else
+      printf '    %sport %s%s used (unknown process) — needed for %s\n' "$C_YEL" "$p" "$C_R" "$label" >&2
+    fi
+  done
+  printf '  %sFree them (see below) or rerun with different --port-* flags:%s\n' "$C_DIM" "$C_R" >&2
+  printf '    lsof -iTCP:5432 -sTCP:LISTEN -Pn        # see who has it\n' >&2
+  printf '    brew services stop postgresql          # if homebrew Postgres\n' >&2
+  printf '    docker ps                              # if another Docker project\n' >&2
+  return 1
+}
+
 wait_http() {
   local url="$1" timeout="${2:-120}" label="${3:-$1}"
   local start now elapsed code
@@ -1161,17 +1207,24 @@ cmd_new() {
   fi
 
   # --- optional: docker compose up -----------------------------------------
-  local up_ok="n" api_ok="n" web_ok="n" app_ok="n"
+  local up_ok="n" up_tried="n" api_ok="n" web_ok="n" app_ok="n"
   if [ "$(lower "$run_up")" = "y" ]; then
-    if command -v docker >/dev/null 2>&1; then
+    up_tried="y"
+    if ! command -v docker >/dev/null 2>&1; then
+      warn "docker not found — skipping 'docker compose up'"
+    elif ! check_host_ports \
+            "marketing site" "$port_web" \
+            "dashboard"      "$port_app" \
+            "API"            "$port_api" \
+            "Postgres"       "$port_db"; then
+      warn "Skipping 'docker compose up' until the port conflict(s) are resolved."
+    else
       say "Starting docker compose (this may take a few minutes on first build) ..."
       if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
         up_ok="y"
       else
-        warn "docker compose failed — you can retry with: cd $name && docker compose -f docker/docker-compose.yml up -d --build"
+        warn "docker compose failed — see output above."
       fi
-    else
-      warn "docker not found — skipping 'docker compose up'"
     fi
   fi
 
@@ -1210,6 +1263,34 @@ EOF
     if [ "$api_ok" != "y" ] || [ "$web_ok" != "y" ] || [ "$app_ok" != "y" ]; then
       warn "One or more services didn't respond within 180s. Check 'docker compose logs' in the project."
     fi
+  elif [ "$up_tried" = "y" ]; then
+    # --up was requested but something blocked it (port conflict, docker
+    # unavailable, or compose error). The scaffold itself is fine — just
+    # show recovery commands instead of suggesting they re-run with --up.
+    cat <<EOF
+
+${C_B}Spin-up didn't complete — project is still scaffolded at ./${name}/${C_R}
+
+${C_DIM}Once the blocker is resolved:${C_R}
+  cd $name
+  docker compose -f docker/docker-compose.yml up -d --build
+  open http://localhost:$port_web     # marketing site
+  open http://localhost:$port_app     # dashboard
+  open http://localhost:$port_api/swagger
+
+${C_DIM}Common fixes:${C_R}
+  lsof -iTCP:$port_db -sTCP:LISTEN -Pn    # see who has your Postgres port
+  brew services stop postgresql           # if it's local Homebrew Postgres
+  docker ps                                # if another Docker project is using it
+
+  # Or change just the host-side Postgres port on this project:
+  sed -i '' 's/"$port_db:5432"/"$((port_db + 100)):5432"/' \\
+    $name/docker/docker-compose.yml
+
+${C_DIM}Admin user (seeded automatically):${C_R}
+  email:    admin@example.com
+  password: change-me-now
+EOF
   else
     cat <<EOF
 
