@@ -162,21 +162,68 @@ prompt_yn() {
   case "$(lower "$reply")" in y|yes) printf 'y\n' ;; *) printf 'n\n' ;; esac
 }
 
-# Numbered multi-choice picker.
-# Usage: prompt_choice <title> <default-id> <id1> <id2> ...
-# Prints the chosen id to stdout.
-prompt_choice() {
+# Human-friendly label (emoji + description) for a known option id.
+# Unknown ids render as-is. Kept lowercase and stable to double as keys.
+_option_label() {
+  case "$1" in
+    # --- themes -----------------------------------------------------------
+    minimalist)      printf '🧼  minimalist        clean, low-contrast, thin borders' ;;
+    neo-brutalism)   printf '🧱  neo-brutalism     chunky borders, hard shadows' ;;
+    glassmorphism)   printf '🫧  glassmorphism     translucent frosted surfaces' ;;
+    claymorphism)    printf '🏺  claymorphism      soft pastels, dual shadows' ;;
+    retro-synthwave) printf '🌆  retro-synthwave   deep purples, neon glow' ;;
+    terminal)        printf '🖥   terminal          monospace, amber on black' ;;
+
+    # --- palettes ---------------------------------------------------------
+    slate)   printf '🪨  slate     cool neutral grey-blues' ;;
+    zinc)    printf '⚫  zinc      warm neutral greys' ;;
+    emerald) printf '🟢  emerald   confident green primary' ;;
+    rose)    printf '🌹  rose      warm pink / red' ;;
+    indigo)  printf '💙  indigo    deep blue' ;;
+    amber)   printf '🟡  amber     warm gold' ;;
+    teal)    printf '💎  teal      balanced teal' ;;
+    cyan)    printf '💠  cyan      bright cool cyan' ;;
+
+    # --- fonts ------------------------------------------------------------
+    inter)                 printf '🔤  Inter                 clean geometric sans' ;;
+    geist)                 printf '🔤  Geist                 Vercel modern sans' ;;
+    space-grotesk)         printf '🔤  Space Grotesk         quirky modern sans' ;;
+    ibm-plex-sans)         printf '🔤  IBM Plex Sans         corporate sans' ;;
+    poppins)               printf '🔤  Poppins               friendly rounded sans' ;;
+    bricolage-grotesque)   printf '🔤  Bricolage Grotesque   editorial display' ;;
+    playfair-display)      printf '📰  Playfair Display      elegant serif' ;;
+    atkinson-hyperlegible) printf '🔤  Atkinson Hyperlegible accessible sans' ;;
+    jetbrains-mono)        printf '🖥   JetBrains Mono        developer monospace' ;;
+    ibm-plex-mono)         printf '🖥   IBM Plex Mono         IBM monospace' ;;
+
+    # --- palette sources --------------------------------------------------
+    preset)        printf '📦  preset         pick one of the curated palettes' ;;
+    theme-default) printf '🎨  theme default  keep the theme intrinsic colors' ;;
+    hex)           printf '🎯  custom hex     enter your own hex colors' ;;
+    url)           printf '🌐  from URL       AI extracts a palette from a website' ;;
+
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# Restore terminal state after an arrow-key menu (shared trap handler).
+__pyon_restore_tty() {
+  [ -n "${__PYON_SAVED_STTY:-}" ] && stty "$__PYON_SAVED_STTY" </dev/tty 2>/dev/null || true
+  printf '\033[?25h' >/dev/tty 2>/dev/null || true   # show cursor
+  __PYON_SAVED_STTY=""
+}
+
+# Plain numbered fallback — used when stdin isn't a TTY, or the user sets
+# PYON_NO_ARROW_MENU=1.
+_prompt_choice_numbered() {
   local title="$1" def="$2"; shift 2
   local ids=("$@") i=1 def_idx=1
-  if [ "${YES:-0}" = "1" ]; then
-    printf '%s\n' "$def"
-    return 0
-  fi
   {
     printf '%s%s%s\n' "$C_B" "$title" "$C_R"
     for id in "${ids[@]}"; do
-      if [ "$id" = "$def" ]; then def_idx=$i; fi
-      printf '  %d) %s%s\n' "$i" "$id" "$([ "$id" = "$def" ] && printf ' (default)' || true)"
+      [ "$id" = "$def" ] && def_idx=$i
+      printf '  %d) %s%s\n' "$i" "$(_option_label "$id")" \
+        "$([ "$id" = "$def" ] && printf ' %s(default)%s' "$C_DIM" "$C_R" || true)"
       i=$((i+1))
     done
     printf 'Choose 1-%d [%d]: ' "${#ids[@]}" "$def_idx"
@@ -192,6 +239,96 @@ prompt_choice() {
   else
     printf '%s\n' "$def"
   fi
+}
+
+# Arrow-key multi-choice picker with emoji labels and live highlight.
+# Usage: prompt_choice <title> <default-id> <id1> <id2> ...
+# Prints the chosen id to stdout; renders the UI on /dev/tty.
+# Falls back to _prompt_choice_numbered when /dev/tty is unavailable, on
+# YES mode, or when PYON_NO_ARROW_MENU=1.
+prompt_choice() {
+  local title="$1" def="$2"; shift 2
+  local ids=("$@")
+  local n=${#ids[@]}
+
+  if [ "${YES:-0}" = "1" ]; then
+    printf '%s\n' "$def"
+    return 0
+  fi
+
+  if [ "${PYON_NO_ARROW_MENU:-0}" = "1" ] || ! { [ -r /dev/tty ] && [ -w /dev/tty ]; }; then
+    _prompt_choice_numbered "$title" "$def" "${ids[@]}"
+    return $?
+  fi
+
+  # Save terminal state so we can always restore on Ctrl+C / failure.
+  __PYON_SAVED_STTY=$(stty -g </dev/tty 2>/dev/null || printf '')
+  if [ -z "$__PYON_SAVED_STTY" ]; then
+    _prompt_choice_numbered "$title" "$def" "${ids[@]}"
+    return $?
+  fi
+  stty -echo -icanon min 1 time 0 </dev/tty 2>/dev/null || {
+    _prompt_choice_numbered "$title" "$def" "${ids[@]}"
+    return $?
+  }
+  printf '\033[?25l' >/dev/tty   # hide cursor
+  # shellcheck disable=SC2064  # intentional: expand $PYON_SAVED_STTY at trap-set time
+  trap '__pyon_restore_tty; trap - INT TERM; exit 130' INT TERM
+
+  local sel=0 i
+  for i in "${!ids[@]}"; do
+    [ "${ids[$i]}" = "$def" ] && sel=$i
+  done
+
+  _draw() {
+    printf '%s%s%s  %s(↑/↓ to move · Enter to select)%s\n' \
+      "$C_B" "$title" "$C_R" "$C_DIM" "$C_R" >/dev/tty
+    for i in "${!ids[@]}"; do
+      if [ "$i" = "$sel" ]; then
+        printf '  %s❯ %s%s\n' "$C_CYAN" "$(_option_label "${ids[$i]}")" "$C_R" >/dev/tty
+      else
+        printf '    %s%s%s\n' "$C_DIM" "$(_option_label "${ids[$i]}")" "$C_R" >/dev/tty
+      fi
+    done
+  }
+
+  _draw
+  local key k2 k3
+  while :; do
+    IFS= read -rsn1 key </dev/tty || key=""
+    if [ "$key" = $'\x1b' ]; then
+      # Give the rest of the escape sequence a brief moment to arrive.
+      IFS= read -rsn1 -t 1 k2 </dev/tty || k2=""
+      IFS= read -rsn1 -t 1 k3 </dev/tty || k3=""
+      key="$key$k2$k3"
+    fi
+
+    case "$key" in
+      $'\x1b[A'|'k') sel=$(( (sel - 1 + n) % n )) ;;
+      $'\x1b[B'|'j') sel=$(( (sel + 1) % n )) ;;
+      ''|$'\n')      break ;;
+      $'\x03')       __pyon_restore_tty; trap - INT TERM; exit 130 ;;
+      q|Q)           __pyon_restore_tty; trap - INT TERM; exit 130 ;;
+      *)             continue ;;
+    esac
+
+    # Move cursor up over (title + n items) and redraw.
+    printf '\033[%dA' "$((n + 1))" >/dev/tty
+    _draw
+  done
+
+  __pyon_restore_tty
+  trap - INT TERM
+
+  # Collapse the menu into a single "Title: ✓ value" summary line.
+  printf '\033[%dA' "$((n + 1))" >/dev/tty
+  local _k
+  for ((_k = 0; _k <= n; _k++)); do printf '\033[2K\n' >/dev/tty; done
+  printf '\033[%dA' "$((n + 1))" >/dev/tty
+  printf '%s%s%s: %s✓%s %s%s%s\n' \
+    "$C_B" "$title" "$C_R" "$C_GRN" "$C_R" "$C_CYAN" "${ids[$sel]}" "$C_R" >/dev/tty
+
+  printf '%s\n' "${ids[$sel]}"
 }
 
 # Silent secret prompt. Prints value to stdout, reads from /dev/tty.
