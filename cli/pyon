@@ -457,10 +457,13 @@ ai_chat_json() {
 # Writes a one-line progress indicator while waiting.
 # Returns 0 if something is already listening on the given host TCP port.
 # Uses bash's built-in /dev/tcp, so no external tools needed.
+# NOTE: the probe *must* stay inside the subshell — if we also did the
+# cleanup (`exec 3<&-`) in the parent shell, bash would treat that as an
+# `exec` with redirections-only and permanently apply every redirection on
+# the line to the current shell. That previously silenced every `warn` for
+# the rest of the CLI run. See commit log for details.
 port_in_use() {
-  local port="$1"
-  (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null && { exec 3<&- 2>/dev/null; return 0; }
-  return 1
+  ( exec 3<>/dev/tcp/127.0.0.1/"$1" ) 2>/dev/null
 }
 
 # Find the first free TCP port >= start_port, trying up to max_steps numbers.
@@ -1109,6 +1112,40 @@ cmd_new() {
   say "Applying copy ..."
   apply_copy "$name" "$merged_copy"
 
+  # --- preflight ports (only relevant if we're going to `docker compose up`).
+  # We auto-remap any busy host port *before* baking it into the template so
+  # the container internals (ASPNETCORE_URLS, NEXT_PUBLIC_API_URL, compose
+  # port mappings) all agree on the final values. Containers therefore come
+  # up regardless of what else is already listening on the host. For
+  # Postgres only the host-side publish is variable (the container always
+  # binds :5432 internally); compose.yml publishes "$port_db:5432" and the
+  # api container talks to postgres over the compose DNS network either way.
+  if [ "$(lower "$run_up")" = "y" ]; then
+    local _remapped=0 _p _new
+    _preflight_port() {
+      local label="$1" var="$2"
+      eval "_p=\$$var"
+      if port_in_use "$_p"; then
+        _new=$(find_free_port $((_p + 1)) 100 || true)
+        if [ -n "$_new" ]; then
+          warn "Host port $_p is busy — remapping $label to $_new."
+          eval "$var=$_new"
+          _remapped=1
+        else
+          warn "Host port $_p for $label is busy and no nearby free port was found — docker compose may fail to bind."
+        fi
+      fi
+    }
+    _preflight_port "marketing site" port_web
+    _preflight_port "dashboard"      port_app
+    _preflight_port "API"            port_api
+    _preflight_port "Postgres"       port_db
+    if [ "$_remapped" = "1" ]; then
+      warn "(Your stack will still be reachable — the final URLs in the summary reflect the remapped ports.)"
+    fi
+    unset -f _preflight_port
+  fi
+
   # --- rewrite tokens -------------------------------------------------------
   say "Rewriting placeholders ..."
 
@@ -1222,42 +1259,20 @@ cmd_new() {
   fi
 
   # --- optional: docker compose up -----------------------------------------
+  # Host-port preflight + auto-remap already happened before the placeholder
+  # rewrite, so by now every published port should be free and the template
+  # is baked with the final values. Just run compose.
   local up_ok="n" up_tried="n" api_ok="n" web_ok="n" app_ok="n"
   if [ "$(lower "$run_up")" = "y" ]; then
     up_tried="y"
     if ! command -v docker >/dev/null 2>&1; then
       warn "docker not found — skipping 'docker compose up'"
     else
-      # Postgres runs inside the compose network; api/web/app talk to it at
-      # postgres:5432 regardless of the host-side mapping. If the chosen host
-      # port is already in use on the machine (very common — Homebrew or
-      # another Docker project), transparently remap the *published* port to
-      # the next free one so we don't block the whole stack.
-      local new_db_port=""
-      if port_in_use "$port_db"; then
-        new_db_port=$(find_free_port $((port_db + 1)) 100 || true)
-        if [ -n "$new_db_port" ]; then
-          sed_inplace "s|\"$port_db:5432\"|\"$new_db_port:5432\"|" \
-            "$name/docker/docker-compose.yml"
-          warn "Host port $port_db is busy (likely a local Postgres) — publishing the Docker Postgres on $new_db_port instead."
-          port_db="$new_db_port"
-        else
-          warn "Couldn't find a free port near $port_db for Postgres; leaving the mapping as-is (docker may fail to bind)."
-        fi
-      fi
-
-      if ! check_host_ports \
-            "marketing site" "$port_web" \
-            "dashboard"      "$port_app" \
-            "API"            "$port_api"; then
-        warn "Skipping 'docker compose up' until the port conflict(s) are resolved."
+      say "Starting docker compose (this may take a few minutes on first build) ..."
+      if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
+        up_ok="y"
       else
-        say "Starting docker compose (this may take a few minutes on first build) ..."
-        if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
-          up_ok="y"
-        else
-          warn "docker compose failed — see output above."
-        fi
+        warn "docker compose failed — see output above."
       fi
     fi
   fi
