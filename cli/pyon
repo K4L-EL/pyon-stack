@@ -1113,37 +1113,82 @@ cmd_new() {
   apply_copy "$name" "$merged_copy"
 
   # --- preflight ports (only relevant if we're going to `docker compose up`).
-  # We auto-remap any busy host port *before* baking it into the template so
-  # the container internals (ASPNETCORE_URLS, NEXT_PUBLIC_API_URL, compose
-  # port mappings) all agree on the final values. Containers therefore come
-  # up regardless of what else is already listening on the host. For
-  # Postgres only the host-side publish is variable (the container always
-  # binds :5432 internally); compose.yml publishes "$port_db:5432" and the
-  # api container talks to postgres over the compose DNS network either way.
+  # Strategy (in order):
+  #   1. Stop any Docker container publishing this host port so the new stack
+  #      can claim the exact port the user chose.
+  #   2. Kill any remaining host-side process (non-Docker).
+  #   3. Only remap to a different port as a last resort.
+  # This runs BEFORE the placeholder rewrite so every baked URL is consistent.
   if [ "$(lower "$run_up")" = "y" ]; then
     local _remapped=0 _p _new
+
+    # Stop any docker container that is publishing the given host port.
+    _evict_docker_port() {
+      local port="$1"
+      if ! command -v docker >/dev/null 2>&1; then return; fi
+      local cids
+      cids=$(docker ps --format '{{.ID}} {{.Ports}}' 2>/dev/null \
+             | awk -v p=":$port->" '$0 ~ p {print $1}')
+      for cid in $cids; do
+        local cname
+        cname=$(docker inspect --format '{{.Name}}' "$cid" 2>/dev/null | sed 's|^/||')
+        say "  Stopping container $cname (holds port $port) ..."
+        docker stop "$cid" >/dev/null 2>&1 || true
+      done
+    }
+
+    # Kill any host-side (non-docker) process listening on a port.
+    _evict_host_port() {
+      local port="$1"
+      local pids
+      pids=$(lsof -iTCP:"$port" -sTCP:LISTEN -Pn -t 2>/dev/null || true)
+      for pid in $pids; do
+        [ "$pid" -le 10 ] && continue
+        local cmd; cmd=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+        case "$cmd" in
+          launchd|kernel_task|WindowServer) continue ;;
+        esac
+        say "  Killing $cmd (pid $pid) on port $port ..."
+        kill "$pid" 2>/dev/null || true
+      done
+      # Give the OS a moment to release the port
+      if [ -n "$pids" ]; then sleep 1; fi
+    }
+
     _preflight_port() {
       local label="$1" var="$2"
       eval "_p=\$$var"
-      if port_in_use "$_p"; then
-        _new=$(find_free_port $((_p + 1)) 100 || true)
-        if [ -n "$_new" ]; then
-          warn "Host port $_p is busy — remapping $label to $_new."
-          eval "$var=$_new"
-          _remapped=1
-        else
-          warn "Host port $_p for $label is busy and no nearby free port was found — docker compose may fail to bind."
-        fi
+      port_in_use "$_p" || return 0          # already free — nothing to do
+
+      # Step 1: evict docker containers on this port
+      _evict_docker_port "$_p"
+      sleep 1
+      port_in_use "$_p" || return 0          # freed by docker stop
+
+      # Step 2: evict host-side processes
+      _evict_host_port "$_p"
+      port_in_use "$_p" || return 0          # freed by kill
+
+      # Step 3: still busy — remap to next free port
+      _new=$(find_free_port $((_p + 1)) 100 || true)
+      if [ -n "$_new" ]; then
+        warn "Port $_p ($label) is still held by an OS-level process — remapping to $_new."
+        eval "$var=$_new"
+        _remapped=1
+      else
+        warn "Port $_p ($label) is busy and no nearby free port was found — docker may fail to bind."
       fi
     }
+
+    say "Checking ports ..."
     _preflight_port "marketing site" port_web
     _preflight_port "dashboard"      port_app
     _preflight_port "API"            port_api
     _preflight_port "Postgres"       port_db
     if [ "$_remapped" = "1" ]; then
-      warn "(Your stack will still be reachable — the final URLs in the summary reflect the remapped ports.)"
+      warn "(Remapped ports shown in final URLs.)"
     fi
-    unset -f _preflight_port
+    unset -f _preflight_port _evict_docker_port _evict_host_port
   fi
 
   # --- rewrite tokens -------------------------------------------------------
@@ -1268,6 +1313,13 @@ cmd_new() {
     if ! command -v docker >/dev/null 2>&1; then
       warn "docker not found — skipping 'docker compose up'"
     else
+      # Tear down any previous incarnation of this project before rebuilding,
+      # so stale containers / cached images from a failed earlier run can't
+      # interfere. --remove-orphans removes containers whose service no longer
+      # exists in the compose file; -v removes the project's named volumes.
+      say "Clearing any previous containers for '$name' ..."
+      ( cd "$name" && docker compose -f docker/docker-compose.yml down -v --remove-orphans 2>&1 ) | grep -v "^#" || true
+
       say "Starting docker compose (this may take a few minutes on first build) ..."
       if ( cd "$name" && docker compose -f docker/docker-compose.yml up -d --build ); then
         up_ok="y"
