@@ -1412,6 +1412,15 @@ ${C_DIM}Admin user (seeded automatically):${C_R}
   password: change-me-now
 EOF
   fi
+
+  # --- open in editor ---------------------------------------------------------
+  if command -v cursor >/dev/null 2>&1; then
+    say "Opening $name in Cursor ..."
+    cursor "$name"
+  elif command -v code >/dev/null 2>&1; then
+    say "Opening $name in VS Code ..."
+    code "$name"
+  fi
 }
 
 cmd_update() {
