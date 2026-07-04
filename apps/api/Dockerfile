@@ -8,6 +8,6 @@ RUN dotnet publish Pyon.Api/Pyon.Api.csproj -c Release -o /app /p:UseAppHost=fal
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app ./
-ENV ASPNETCORE_URLS=http://+:__PYON_PORT_API__
-EXPOSE __PYON_PORT_API__
-ENTRYPOINT ["dotnet", "__PYON_NAMESPACE__.Api.dll"]
+ENV ASPNETCORE_URLS=http://+:5082
+EXPOSE 5082
+ENTRYPOINT ["dotnet", "Pyon.Api.dll"]
